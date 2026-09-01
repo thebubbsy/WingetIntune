@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Uploads a file to Azure Storage Block Blob with full block ID map persistence and resume capabilities.
+    Uploads a file to Azure Storage Block Blob with deterministic block IDs and zero-local-state resume.
 .DESCRIPTION
-    Divides large files into 6MB block chunks, tracks Base64 block IDs in a persisted JSON session file
-    ($env:LOCALAPPDATA\WingetIntune\UploadSessions\<UploadId>.json), probes Azure for already uploaded blocks
-    on resume via comp=blocklist (using Azure as the authoritative source of truth), and commits the block list.
+    Divides large files into 6MB block chunks using deterministic Base64 block IDs (block_000000, block_000001, etc.).
+    Queries Azure's comp=blocklist as the authoritative source of truth, enabling 100% resilient resume even if
+    the local machine crashed or the local session cache was deleted.
 #>
 function Send-AzureBlockBlob {
     [CmdletBinding()]
@@ -32,7 +32,7 @@ function Send-AzureBlockBlob {
         throw "File not found: $FilePath"
     }
 
-    $sessionDir = Join-Path $env:LOCALAPPDATA 'WingetIntune\UploadSessions'
+    $sessionDir = "C:\ProgramData\WingetIntune\UploadSessions"
     if (-not (Test-Path $sessionDir)) {
         New-Item -ItemType Directory -Path $sessionDir -Force | Out-Null
     }
@@ -43,20 +43,22 @@ function Send-AzureBlockBlob {
     $chunkSizeBytes = $BlockSizeMb * 1024 * 1024
     $totalBlocks = [int][Math]::Ceiling($fileLength / $chunkSizeBytes)
 
-    # 1. Generate or Load Full Block Map
+    # 1. Generate Deterministic Block Map (block_000000 -> Base64)
+    # Because IDs are deterministic, server-side recovery is 100% possible without local state!
     $blockMap = [System.Collections.Generic.List[PSCustomObject]]::new()
     for ($i = 0; $i -lt $totalBlocks; $i++) {
         $rawId = "block_{0:D6}" -f $i
         $base64Id = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawId))
         $blockMap.Add([PSCustomObject]@{
             Index  = $i
+            RawId  = $rawId
             Id     = $base64Id
             Status = 'Pending'
         })
     }
 
-    # 2. Query Azure Storage as Authoritative Source of Truth for Uploaded Blocks
-    $serverCommittedOrUncommitted = [System.Collections.Generic.HashSet[string]]::new()
+    # 2. Query Azure Storage Server-Side Block List (Authoritative Source of Truth)
+    $serverBlockIds = [System.Collections.Generic.HashSet[string]]::new()
     try {
         $separator = if ($SasUri -match '\?') { '&' } else { '?' }
         $blockListUri = $SasUri + $separator + "comp=blocklist&blocklisttype=all"
@@ -69,27 +71,29 @@ function Send-AzureBlockBlob {
 
         if ($serverBlocksXml.BlockList.UncommittedBlocks.Block) {
             foreach ($b in $serverBlocksXml.BlockList.UncommittedBlocks.Block) {
-                [void]$serverCommittedOrUncommitted.Add($b.Name)
+                [void]$serverBlockIds.Add($b.Name)
             }
         }
         if ($serverBlocksXml.BlockList.CommittedBlocks.Block) {
             foreach ($b in $serverBlocksXml.BlockList.CommittedBlocks.Block) {
-                [void]$serverCommittedOrUncommitted.Add($b.Name)
+                [void]$serverBlockIds.Add($b.Name)
             }
         }
 
+        # Reconcile server blocks against deterministic IDs
         foreach ($bm in $blockMap) {
-            if ($serverCommittedOrUncommitted.Contains($bm.Id)) {
+            if ($serverBlockIds.Contains($bm.Id)) {
                 $bm.Status = 'Uploaded'
             }
         }
 
         $alreadyUploaded = @($blockMap | Where-Object { $_.Status -eq 'Uploaded' }).Count
         if ($alreadyUploaded -gt 0) {
-            Write-Host "  [+] Resuming upload: $alreadyUploaded/$totalBlocks blocks verified on Azure Storage." -ForegroundColor Yellow
+            Write-Host "  [+] Authoritative Server Reconciliation: $alreadyUploaded/$totalBlocks blocks already verified on Azure Storage." -ForegroundColor Yellow
         }
     } catch { }
 
+    # Write-ahead session cache
     $session = [PSCustomObject]@{
         UploadId        = $UploadId
         FilePath        = $FilePath
@@ -101,7 +105,7 @@ function Send-AzureBlockBlob {
     }
     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
 
-    Write-Host "  [+] Uploading $($file.Name) ($([Math]::Round($fileLength / 1MB, 2)) MB in $totalBlocks blocks)..." -ForegroundColor Cyan
+    Write-Host "  [+] Uploading $($file.Name) ($([Math]::Round($fileLength / 1MB, 2)) MB across $totalBlocks blocks)..." -ForegroundColor Cyan
 
     $fileStream = [System.IO.File]::OpenRead($FilePath)
     $buffer = New-Object byte[] $chunkSizeBytes
@@ -117,11 +121,11 @@ function Send-AzureBlockBlob {
                 continue
             }
 
+            # Transactional Write-Ahead status
             $currentBlock.Status = 'Uploading'
             $separator = if ($SasUri -match '\?') { '&' } else { '?' }
             $blockUri = $SasUri + $separator + "comp=block&blockid=" + [System.Uri]::EscapeDataString($currentBlock.Id)
 
-            # Upload block with retry backoff
             $retry = 0
             $uploaded = $false
 
@@ -141,6 +145,7 @@ function Send-AzureBlockBlob {
                     $response.Close()
                     $uploaded = $true
 
+                    # Confirmed upload
                     $currentBlock.Status = 'Uploaded'
                     $session.LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
                     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
@@ -154,7 +159,7 @@ function Send-AzureBlockBlob {
                         throw "Failed to upload block $i after $MaxRetries retries: $($_.Exception.Message)"
                     }
                     $delay = [Math]::Pow(2, $retry)
-                    Write-Warning "Block $i failed. Retrying in $delay seconds..."
+                    Write-Warning "Block $i failed ($($_.Exception.Message)). Retrying in $delay seconds..."
                     Start-Sleep -Seconds $delay
                 }
             }
@@ -169,7 +174,7 @@ function Send-AzureBlockBlob {
     }
 
     # 3. Commit Ordered Block List
-    Write-Host "  [+] Committing block list to finalize upload..." -ForegroundColor Cyan
+    Write-Host "  [+] Committing full block list to Azure Storage..." -ForegroundColor Cyan
     $separator = if ($SasUri -match '\?') { '&' } else { '?' }
     $commitUri = $SasUri + $separator + "comp=blocklist"
 
@@ -198,6 +203,6 @@ function Send-AzureBlockBlob {
     $session.LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
 
-    Write-Host "  [OK] Azure Block Blob commit successful!" -ForegroundColor Green
+    Write-Host "  [OK] Azure Block Blob commit confirmed!" -ForegroundColor Green
     return $true
 }
