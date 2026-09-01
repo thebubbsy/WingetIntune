@@ -4,7 +4,7 @@
 .DESCRIPTION
     Divides large files into 6MB block chunks, tracks Base64 block IDs in a persisted JSON session file
     ($env:LOCALAPPDATA\WingetIntune\UploadSessions\<UploadId>.json), probes Azure for already uploaded blocks
-    on resume via comp=blocklist, and commits the block list.
+    on resume via comp=blocklist (using Azure as the authoritative source of truth), and commits the block list.
 #>
 function Send-AzureBlockBlob {
     [CmdletBinding()]
@@ -55,36 +55,40 @@ function Send-AzureBlockBlob {
         })
     }
 
-    # 2. Check for Resumption via Server-Side Block List Probe
-    if ($Resume) {
-        try {
-            $separator = if ($SasUri -match '\?') { '&' } else { '?' }
-            $blockListUri = $SasUri + $separator + "comp=blocklist&blocklisttype=all"
-            $blReq = [System.Net.HttpWebRequest]::Create($blockListUri)
-            $blReq.Method = 'GET'
-            $blResp = $blReq.GetResponse()
-            $sr = New-Object System.IO.StreamReader($blResp.GetResponseStream())
-            [xml]$serverBlocksXml = $sr.ReadToEnd()
-            $blResp.Close()
+    # 2. Query Azure Storage as Authoritative Source of Truth for Uploaded Blocks
+    $serverCommittedOrUncommitted = [System.Collections.Generic.HashSet[string]]::new()
+    try {
+        $separator = if ($SasUri -match '\?') { '&' } else { '?' }
+        $blockListUri = $SasUri + $separator + "comp=blocklist&blocklisttype=all"
+        $blReq = [System.Net.HttpWebRequest]::Create($blockListUri)
+        $blReq.Method = 'GET'
+        $blResp = $blReq.GetResponse()
+        $sr = New-Object System.IO.StreamReader($blResp.GetResponseStream())
+        [xml]$serverBlocksXml = $sr.ReadToEnd()
+        $blResp.Close()
 
-            $serverUncommitted = @()
-            if ($serverBlocksXml.BlockList.UncommittedBlocks.Block) {
-                $serverUncommitted = @($serverBlocksXml.BlockList.UncommittedBlocks.Block | ForEach-Object { $_.Name })
+        if ($serverBlocksXml.BlockList.UncommittedBlocks.Block) {
+            foreach ($b in $serverBlocksXml.BlockList.UncommittedBlocks.Block) {
+                [void]$serverCommittedOrUncommitted.Add($b.Name)
             }
-            if ($serverBlocksXml.BlockList.CommittedBlocks.Block) {
-                $serverUncommitted += @($serverBlocksXml.BlockList.CommittedBlocks.Block | ForEach-Object { $_.Name })
+        }
+        if ($serverBlocksXml.BlockList.CommittedBlocks.Block) {
+            foreach ($b in $serverBlocksXml.BlockList.CommittedBlocks.Block) {
+                [void]$serverCommittedOrUncommitted.Add($b.Name)
             }
+        }
 
-            foreach ($bm in $blockMap) {
-                if ($serverUncommitted -contains $bm.Id) {
-                    $bm.Status = 'Uploaded'
-                }
+        foreach ($bm in $blockMap) {
+            if ($serverCommittedOrUncommitted.Contains($bm.Id)) {
+                $bm.Status = 'Uploaded'
             }
+        }
 
-            $alreadyUploaded = @($blockMap | Where-Object { $_.Status -eq 'Uploaded' }).Count
-            Write-Host "  [+] Resuming upload: $alreadyUploaded/$totalBlocks blocks already verified on server." -ForegroundColor Yellow
-        } catch { }
-    }
+        $alreadyUploaded = @($blockMap | Where-Object { $_.Status -eq 'Uploaded' }).Count
+        if ($alreadyUploaded -gt 0) {
+            Write-Host "  [+] Resuming upload: $alreadyUploaded/$totalBlocks blocks verified on Azure Storage." -ForegroundColor Yellow
+        }
+    } catch { }
 
     $session = [PSCustomObject]@{
         UploadId        = $UploadId
@@ -104,6 +108,7 @@ function Send-AzureBlockBlob {
 
     try {
         for ($i = 0; $i -lt $totalBlocks; $i++) {
+            $fileStream.Position = [int64]$i * [int64]$chunkSizeBytes
             $bytesRead = $fileStream.Read($buffer, 0, $chunkSizeBytes)
             if ($bytesRead -le 0) { break }
 
@@ -112,6 +117,7 @@ function Send-AzureBlockBlob {
                 continue
             }
 
+            $currentBlock.Status = 'Uploading'
             $separator = if ($SasUri -match '\?') { '&' } else { '?' }
             $blockUri = $SasUri + $separator + "comp=block&blockid=" + [System.Uri]::EscapeDataString($currentBlock.Id)
 
@@ -142,6 +148,7 @@ function Send-AzureBlockBlob {
                 catch {
                     $retry++
                     if ($retry -gt $MaxRetries) {
+                        $currentBlock.Status = 'Failed'
                         $session.State = 'Failed'
                         $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
                         throw "Failed to upload block $i after $MaxRetries retries: $($_.Exception.Message)"

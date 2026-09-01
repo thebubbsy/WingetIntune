@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Fetches and parses a Winget package manifest from the official community repository.
+    Fetches and parses a Winget package manifest with explicit architecture and scope resolution.
 .DESCRIPTION
-    Queries the public Winget repository, downloads the installer manifest YAML,
-    resolves architecture (x64/x86/arm64), and extracts declared InstallerSwitches,
-    InstallerSuccessCodes, ProductCode, and AppsAndFeatures entries.
+    Queries the official Winget catalog, downloads the version/installer manifest YAML,
+    filters installers by target architecture (x64, arm64, x86) and scope (machine),
+    and extracts declared switches, ProductCode, and success codes.
 #>
 function Get-WingetManifest {
     [CmdletBinding()]
@@ -16,6 +16,7 @@ function Get-WingetManifest {
         [string]$Version = '',
 
         [Parameter()]
+        [ValidateSet('x64', 'arm64', 'x86')]
         [string]$Architecture = 'x64',
 
         [Parameter()]
@@ -31,13 +32,14 @@ function Get-WingetManifest {
     $publisher = $pathParts[0]
     $appName = if ($pathParts.Count -gt 1) { [string]::Join('/', $pathParts[1..($pathParts.Count - 1)]) } else { $publisher }
     
-    Write-Host "  [+] Querying Winget manifest for '$PackageId'..." -ForegroundColor Cyan
+    Write-Host "  [+] Querying Winget manifest for '$PackageId' (Target Arch: $Architecture)..." -ForegroundColor Cyan
 
     $manifestData = [PSCustomObject]@{
         PackageId              = $PackageId
         Version                = $Version
         Name                   = $PackageId
         Publisher              = $publisher
+        Architecture           = $Architecture
         InstallerType          = 'exe'
         InstallerUrl           = ''
         InstallerSha256        = ''
@@ -53,7 +55,7 @@ function Get-WingetManifest {
         AppsAndFeaturesEntries = @()
     }
 
-    # 1. Query via winget CLI if installed
+    # 1. Query via winget CLI with architecture filter if installed
     if (Get-Command 'winget.exe' -ErrorAction SilentlyContinue) {
         try {
             $showRaw = winget show --exact --id $PackageId --source winget --accept-source-agreements 2>$null
@@ -67,7 +69,7 @@ function Get-WingetManifest {
         } catch { }
     }
 
-    # 2. Query GitHub CDN for deep manifest YAML if version resolved
+    # 2. Query GitHub CDN raw manifest YAML with architecture matching
     if ($manifestData.Version) {
         $ver = $manifestData.Version
         $manifestYamlUrls = @(
@@ -82,10 +84,33 @@ function Get-WingetManifest {
                 $yamlContent = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop).Content
                 if ($yamlContent) {
                     $inSwitches = $false
+                    $inInstallers = $false
+                    $currentInstallerArch = ''
+                    $isTargetArch = $true
+
                     foreach ($line in ($yamlContent -split "`r?`n")) {
                         if ($line -match '^InstallerType:\s*(.+)$') { $manifestData.InstallerType = $Matches[1].Trim().ToLowerInvariant() }
                         if ($line -match '^ProductCode:\s*(.+)$') { $manifestData.ProductCode = $Matches[1].Trim() }
-                        if ($line -match '^InstallerSwitches:') { $inSwitches = $true; continue }
+                        
+                        # Handle Architecture blocks
+                        if ($line -match '^\s+Architecture:\s*(.+)$') {
+                            $currentInstallerArch = $Matches[1].Trim().ToLowerInvariant()
+                            $isTargetArch = ($currentInstallerArch -eq $Architecture.ToLowerInvariant() -or $currentInstallerArch -eq 'neutral')
+                        }
+
+                        if ($line -match '^\s+InstallerUrl:\s*(.+)$' -and $isTargetArch) {
+                            $manifestData.InstallerUrl = $Matches[1].Trim()
+                        }
+
+                        if ($line -match '^\s+InstallerSha256:\s*(.+)$' -and $isTargetArch) {
+                            $manifestData.InstallerSha256 = $Matches[1].Trim()
+                        }
+
+                        if ($line -match '^InstallerSwitches:' -or $line -match '^\s+InstallerSwitches:') {
+                            $inSwitches = $true
+                            continue
+                        }
+
                         if ($inSwitches) {
                             if ($line -match '^\s+Silent:\s*[''"]?(.*?)[''"]?\s*$') { $manifestData.InstallerSwitches.Silent = $Matches[1].Trim() }
                             if ($line -match '^\s+SilentWithProgress:\s*[''"]?(.*?)[''"]?\s*$') { $manifestData.InstallerSwitches.SilentWithProgress = $Matches[1].Trim() }

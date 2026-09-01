@@ -4,7 +4,7 @@
 .DESCRIPTION
     Automates the full Win32 app ingestion pipeline: creates the win32LobApp entity,
     extracts encryption headers, uploads chunked blocks to Azure Storage SAS URIs,
-    commits the file, waits for Intune server-side processing to reach commitFileSuccess,
+    commits the file, waits for Intune server-side processing to reach terminal succeeded state,
     and assigns to Entra groups.
 #>
 function Publish-IntuneWingetApp {
@@ -170,8 +170,8 @@ function Publish-IntuneWingetApp {
 
     Invoke-ResilientGraphRest -Uri $commitUri -Method POST -Headers $authHeader -Body $commitPayload | Out-Null
 
-    # 11. Wait for Intune Server-Side Content File Processing
-    Write-Host "  [+] Waiting for Intune server-side file processing & encryption validation..." -NoNewline -ForegroundColor Cyan
+    # 11. Wait for Intune Server-Side Processing to reach Terminal Success State
+    Write-Host "  [+] Waiting for Intune server-side processing & metadata validation..." -NoNewline -ForegroundColor Cyan
     $procSw = [System.Diagnostics.Stopwatch]::StartNew()
     $fileCommitted = $false
 
@@ -183,12 +183,13 @@ function Publish-IntuneWingetApp {
             $fileStatus = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
             $state = $fileStatus.uploadState
 
-            if ($state -eq 'commitFileSuccess' -or ($state -eq 'committed' -and $fileStatus.sizeEncrypted -gt 0)) {
+            # Check for terminal success states
+            if ($state -eq 'succeeded' -or $state -eq 'commitFileSuccess' -or ($fileStatus.sizeEncrypted -gt 0 -and $fileStatus.isCommitted)) {
                 $fileCommitted = $true
-                Write-Host "`n  [OK] Intune file processing complete (Upload State: $state, Size: $($fileStatus.size) bytes)." -ForegroundColor Green
+                Write-Host "`n  [OK] Intune file processing complete (State: $state, Encrypted Size: $($fileStatus.sizeEncrypted) bytes)." -ForegroundColor Green
                 break
             }
-            elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed') {
+            elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed' -or $state -eq 'failed') {
                 throw "Intune server-side processing failed with uploadState: $state"
             }
         } catch {
