@@ -5,8 +5,8 @@
     Author = 'Matthew Bubb'
     CompanyName = 'OnYaChamp.com'
     Copyright = '(c) 2026 Matthew Bubb. All rights reserved.'
-    Description = 'Enterprise Win32 packaging engine and Microsoft Graph cloud publisher with type-safe package adapters and durable Azure Block Blob upload state machines.'
-    PowerShellVersion = '5.1'
+    Description = 'Enterprise Win32 packaging engine and Microsoft Graph cloud publisher with type-safe package adapters and durable Azure Block Blob upload state machines for PowerShell 7+.'
+    PowerShellVersion = '7.2'
     RequiredModules = @()
     FunctionsToExport = @(
         'New-IntuneWingetPackage',
@@ -21,7 +21,7 @@
     AliasesToExport = @('Publish-IntuneWin32App')
     PrivateData = @{
         PSData = @{
-            Tags = @('intune', 'winget', 'win32-app', 'intunewin', 'packaging', 'graph-api', 'proactive-remediations', 'enterprise')
+            Tags = @('intune', 'winget', 'win32-app', 'intunewin', 'packaging', 'graph-api', 'pwsh7', 'proactive-remediations', 'enterprise')
             LicenseUri = 'https://github.com/thebubbsy/WingetIntune/blob/main/LICENSE'
             ProjectUri = 'https://github.com/thebubbsy/WingetIntune'
         }
