@@ -2,8 +2,9 @@
 .SYNOPSIS
     Fetches and parses a Winget package manifest from the official community repository.
 .DESCRIPTION
-    Queries the public Winget repository, downloads the version/installer manifest YAML,
-    resolves architecture (x64/x86/arm64), and extracts installer switches and metadata.
+    Queries the public Winget repository, downloads the installer manifest YAML,
+    resolves architecture (x64/x86/arm64), and extracts declared InstallerSwitches,
+    InstallerSuccessCodes, ProductCode, and AppsAndFeatures entries.
 #>
 function Get-WingetManifest {
     [CmdletBinding()]
@@ -41,8 +42,8 @@ function Get-WingetManifest {
         InstallerUrl           = ''
         InstallerSha256        = ''
         InstallerSwitches      = @{
-            Silent             = '/silent /quiet /qn /S'
-            SilentWithProgress = '/passive'
+            Silent             = ''
+            SilentWithProgress = ''
             Custom             = ''
             InstallLocation    = ''
         }
@@ -52,7 +53,7 @@ function Get-WingetManifest {
         AppsAndFeaturesEntries = @()
     }
 
-    # Query via winget CLI if installed
+    # 1. Query via winget CLI if installed
     if (Get-Command 'winget.exe' -ErrorAction SilentlyContinue) {
         try {
             $showRaw = winget show --exact --id $PackageId --source winget --accept-source-agreements 2>$null
@@ -61,8 +62,41 @@ function Get-WingetManifest {
                 if ($line -match '^Publisher:\s*(.+)$') { $manifestData.Publisher = $Matches[1].Trim() }
                 if ($line -match '^Installer Type:\s*(.+)$') { $manifestData.InstallerType = $Matches[1].Trim().ToLowerInvariant() }
                 if ($line -match '^Installer SHA256:\s*(.+)$') { $manifestData.InstallerSha256 = $Matches[1].Trim() }
+                if ($line -match '^Installer Url:\s*(.+)$') { $manifestData.InstallerUrl = $Matches[1].Trim() }
             }
         } catch { }
+    }
+
+    # 2. Query GitHub CDN for deep manifest YAML if version resolved
+    if ($manifestData.Version) {
+        $ver = $manifestData.Version
+        $manifestYamlUrls = @(
+            "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$firstLetter/$publisher/$appName/$ver/$publisher.$appName.installer.yaml",
+            "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$firstLetter/$publisher/$appName/$ver/$PackageId.installer.yaml",
+            "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$firstLetter/$publisher/$appName/$ver/$publisher.$appName.yaml",
+            "https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/$firstLetter/$publisher/$appName/$ver/$PackageId.yaml"
+        )
+
+        foreach ($url in $manifestYamlUrls) {
+            try {
+                $yamlContent = (Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop).Content
+                if ($yamlContent) {
+                    $inSwitches = $false
+                    foreach ($line in ($yamlContent -split "`r?`n")) {
+                        if ($line -match '^InstallerType:\s*(.+)$') { $manifestData.InstallerType = $Matches[1].Trim().ToLowerInvariant() }
+                        if ($line -match '^ProductCode:\s*(.+)$') { $manifestData.ProductCode = $Matches[1].Trim() }
+                        if ($line -match '^InstallerSwitches:') { $inSwitches = $true; continue }
+                        if ($inSwitches) {
+                            if ($line -match '^\s+Silent:\s*[''"]?(.*?)[''"]?\s*$') { $manifestData.InstallerSwitches.Silent = $Matches[1].Trim() }
+                            if ($line -match '^\s+SilentWithProgress:\s*[''"]?(.*?)[''"]?\s*$') { $manifestData.InstallerSwitches.SilentWithProgress = $Matches[1].Trim() }
+                            if ($line -match '^\s+Custom:\s*[''"]?(.*?)[''"]?\s*$') { $manifestData.InstallerSwitches.Custom = $Matches[1].Trim() }
+                            if ($line -match '^\S') { $inSwitches = $false }
+                        }
+                    }
+                    break
+                }
+            } catch { }
+        }
     }
 
     # Cache manifest descriptor locally
