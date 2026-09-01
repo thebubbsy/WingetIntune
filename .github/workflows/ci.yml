@@ -1,0 +1,39 @@
+name: CI Test & Secret Audit
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run Pester Tests & Manifest Validation
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate Module Manifest
+        shell: pwsh
+        run: |
+          $psd1 = Get-ChildItem -Path . -Filter "*.psd1" -File | Select-Object -First 1
+          if ($psd1) {
+            Write-Host "Testing Module Manifest: $($psd1.FullName)"
+            Test-ModuleManifest -Path $psd1.FullName
+          }
+
+      - name: Execute Pester Test Suite
+        shell: pwsh
+        run: |
+          if (Test-Path './tests') {
+            Import-Module Pester -Force
+            $res = Invoke-Pester -Path './tests' -PassThru
+            if ($res.FailedCount -gt 0) {
+              Write-Error "Pester tests failed with $($res.FailedCount) failures."
+              exit 1
+            }
+          }
