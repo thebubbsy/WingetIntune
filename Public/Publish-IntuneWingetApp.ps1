@@ -3,19 +3,9 @@
     Publishes a compiled .intunewin package directly to Microsoft Intune via Microsoft Graph.
 .DESCRIPTION
     Automates the full Win32 app ingestion pipeline: creates the win32LobApp entity,
-    extracts encryption headers, uploads chunked blocks to Azure Storage SAS URIs using the
-    durable state machine, commits the file, configures custom PowerShell detection rules,
+    extracts encryption headers, uploads chunked blocks to Azure Storage SAS URIs,
+    commits the file, waits for Intune server-side processing to reach commitFileSuccess,
     and assigns to Entra groups.
-.PARAMETER IntuneWinPath
-    Path to the compiled .intunewin package.
-.PARAMETER MetadataJsonPath
-    Path to the companion IntuneAppMetadata.json file.
-.PARAMETER AssignTo
-    Array of Entra ID Group IDs or Names to assign the application to.
-.PARAMETER Intent
-    Assignment intent: 'Required' or 'Available'.
-.EXAMPLE
-    Publish-IntuneWingetApp -IntuneWinPath ".\dist\Git.Git.intunewin" -AssignTo "All Devices"
 #>
 function Publish-IntuneWingetApp {
     [CmdletBinding()]
@@ -32,7 +22,10 @@ function Publish-IntuneWingetApp {
 
         [Parameter()]
         [ValidateSet('Required', 'Available')]
-        [string]$Intent = 'Required'
+        [string]$Intent = 'Required',
+
+        [Parameter()]
+        [int]$ProcessingTimeoutMinutes = 15
     )
 
     Write-Host "`n  [WingetIntune] Microsoft Graph Win32 App Cloud Publisher" -ForegroundColor Cyan
@@ -161,7 +154,7 @@ function Publish-IntuneWingetApp {
     Send-AzureBlockBlob -FilePath $IntuneWinPath -SasUri $azureSasUri
 
     # 10. Commit File in Microsoft Graph
-    Write-Host "  [+] Finalizing file commit in Microsoft Graph..." -ForegroundColor Cyan
+    Write-Host "  [+] Submitting file commit action to Microsoft Graph..." -ForegroundColor Cyan
     $commitUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId/commit"
     $commitPayload = @{
         fileEncryptionInfo = @{
@@ -177,7 +170,38 @@ function Publish-IntuneWingetApp {
 
     Invoke-ResilientGraphRest -Uri $commitUri -Method POST -Headers $authHeader -Body $commitPayload | Out-Null
 
-    # 11. Bind Committed Content Version to Mobile App
+    # 11. Wait for Intune Server-Side Content File Processing
+    Write-Host "  [+] Waiting for Intune server-side file processing & encryption validation..." -NoNewline -ForegroundColor Cyan
+    $procSw = [System.Diagnostics.Stopwatch]::StartNew()
+    $fileCommitted = $false
+
+    while ($procSw.Elapsed.TotalMinutes -lt $ProcessingTimeoutMinutes) {
+        Start-Sleep -Seconds 10
+        Write-Host "." -NoNewline -ForegroundColor Cyan
+
+        try {
+            $fileStatus = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
+            $state = $fileStatus.uploadState
+
+            if ($state -eq 'commitFileSuccess' -or ($state -eq 'committed' -and $fileStatus.sizeEncrypted -gt 0)) {
+                $fileCommitted = $true
+                Write-Host "`n  [OK] Intune file processing complete (Upload State: $state, Size: $($fileStatus.size) bytes)." -ForegroundColor Green
+                break
+            }
+            elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed') {
+                throw "Intune server-side processing failed with uploadState: $state"
+            }
+        } catch {
+            if ($_.Exception.Message -match 'failed') { throw $_ }
+        }
+    }
+    $procSw.Stop()
+
+    if (-not $fileCommitted) {
+        Write-Warning "`nFile processing timed out after $ProcessingTimeoutMinutes minutes. Proceeding with content version binding."
+    }
+
+    # 12. Bind Committed Content Version to Mobile App
     Write-Host "  [+] Binding Content Version to Mobile App..." -ForegroundColor Cyan
     $updateAppUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId"
     $updateAppPayload = @{
@@ -186,12 +210,12 @@ function Publish-IntuneWingetApp {
     }
     Invoke-ResilientGraphRest -Uri $updateAppUri -Method PATCH -Headers $authHeader -Body $updateAppPayload | Out-Null
 
-    # Cleanup temp
+    # Cleanup temp extraction
     Remove-Item -Path $tempZip -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-Host "  [OK] App '$appName' successfully published to Intune!" -ForegroundColor Green
 
-    # 12. Handle Group Assignments
+    # 13. Handle Group Assignments
     if ($AssignTo -and $AssignTo.Count -gt 0) {
         foreach ($group in $AssignTo) {
             Add-IntuneWingetAssignment -AppId $appId -GroupId $group -Intent $Intent
