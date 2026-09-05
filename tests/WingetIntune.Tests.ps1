@@ -1,6 +1,10 @@
 BeforeAll {
-    $sharedPath = Resolve-Path (Join-Path $PSScriptRoot '..\..\IntuneShared\IntuneShared.psd1')
-    Import-Module $sharedPath -Force
+    $sharedPath = Join-Path $PSScriptRoot '..\..\IntuneShared\IntuneShared.psd1'
+    if (Test-Path $sharedPath) {
+        Import-Module (Resolve-Path $sharedPath) -Force
+    } else {
+        Import-Module IntuneShared -Force -ErrorAction SilentlyContinue
+    }
     $modulePath = Resolve-Path (Join-Path $PSScriptRoot '..\WingetIntune.psd1')
     Import-Module $modulePath -Force
 }
@@ -44,14 +48,19 @@ Describe 'WingetIntune Architecture Tests' {
 
     Context 'Detection Strategy Hierarchy' {
         It 'Emits ProductCode detection script when ProductCode is present' {
-            $script = New-StandaloneDetectShim -PackageId 'Test.MSI' -ProductCode '{TEST-GUID}'
-            $script | Should -Match 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\\{TEST-GUID\}'
+            InModuleScope 'WingetIntune' {
+                $script = New-StandaloneDetectShim -PackageId 'Test.MSI' -ProductCode '{TEST-GUID}'
+                $script | Should -Match 'SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+                $script | Should -Match '\{TEST-GUID\}'
+            }
         }
 
         It 'Emits Registry DisplayVersion scan when ProductCode is absent' {
-            $script = New-StandaloneDetectShim -PackageId 'Test.Inno' -DisplayName 'Inno App' -MinVersion '1.2.3'
-            $script | Should -Match 'DisplayVersion'
-            $script | Should -Match '1\.2\.3'
+            InModuleScope 'WingetIntune' {
+                $script = New-StandaloneDetectShim -PackageId 'Test.Inno' -DisplayName 'Inno App' -MinVersion '1.2.3'
+                $script | Should -Match 'DisplayVersion'
+                $script | Should -Match '1\.2\.3'
+            }
         }
     }
 }

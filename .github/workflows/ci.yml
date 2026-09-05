@@ -17,6 +17,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install IntuneShared Dependency
+        shell: pwsh
+        run: |
+          try {
+            Install-Module -Name IntuneShared -Force -Scope CurrentUser -ErrorAction Stop
+          } catch {
+            Write-Host "Installing IntuneShared dependency from GitHub..."
+            $modDir = "$([Environment]::GetFolderPath('MyDocuments'))\PowerShell\Modules\IntuneShared"
+            git clone https://github.com/thebubbsy/IntuneShared.git $modDir
+          }
+
       - name: Validate Module Manifest
         shell: pwsh
         run: |
