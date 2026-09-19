@@ -14,7 +14,8 @@
         'Add-IntuneWingetAssignment',
         'New-IntuneRemediation',
         'Sync-IntuneWingetCatalog',
-        'Get-PackageAdapter'
+        'Get-PackageAdapter',
+        'Clear-OrphanedIntuneUploads'
     )
     CmdletsToExport = @()
     VariablesToExport = @()

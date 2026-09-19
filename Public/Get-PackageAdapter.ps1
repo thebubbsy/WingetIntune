@@ -104,6 +104,32 @@ function Get-PackageAdapter {
                 Notes                = 'WiX Burn Chainer'
             }
         }
+        'electron' {
+            $silent = if ($customSilentArgs) { $customSilentArgs } else { '--allusers --force-install /silent /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' }
+            return [PSCustomObject]@{
+                InstallerType        = 'electron'
+                SilentArgs           = $silent
+                InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
+                UninstallCommandLine = 'powershell.exe -ExecutionPolicy Bypass -File .\Uninstall.ps1'
+                DetectionStrategy    = 'FileVersionOrRegistry'
+                SuccessCodes         = $successCodes
+                SupportedUnderSystem = $true
+                Notes                = 'Electron / Squirrel Framework Installer (--allusers and AppData redirection)'
+            }
+        }
+        'chromium' {
+            $silent = if ($customSilentArgs) { $customSilentArgs } else { '--system-level --allusers --force-install /silent /qn' }
+            return [PSCustomObject]@{
+                InstallerType        = 'chromium'
+                SilentArgs           = $silent
+                InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
+                UninstallCommandLine = 'powershell.exe -ExecutionPolicy Bypass -File .\Uninstall.ps1'
+                DetectionStrategy    = 'RegistryDisplayVersion'
+                SuccessCodes         = $successCodes
+                SupportedUnderSystem = $true
+                Notes                = 'Chromium-based Application Installer (--system-level / silent)'
+            }
+        }
         'msix' {
             return [PSCustomObject]@{
                 InstallerType        = 'msix'

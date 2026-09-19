@@ -3,9 +3,9 @@
     Publishes a compiled .intunewin package directly to Microsoft Intune via Microsoft Graph.
 .DESCRIPTION
     Automates the full Win32 app ingestion pipeline: creates the win32LobApp entity,
-    extracts encryption headers, uploads chunked blocks to Azure Storage SAS URIs,
+    extracts encryption headers, uploads chunked blocks to Azure Storage SAS URIs with durable session resumption,
     commits the file, waits for Intune server-side processing to reach terminal succeeded state,
-    and assigns to Entra groups.
+    handles dead contentVersion recovery on SAS expiration, and assigns to Entra groups.
 #>
 function Publish-IntuneWingetApp {
     [CmdletBinding()]
@@ -13,6 +13,9 @@ function Publish-IntuneWingetApp {
     param(
         [Parameter(Mandatory = $true, Position = 0)]
         [string]$IntuneWinPath,
+
+        [Parameter()]
+        [string]$PackageId = '',
 
         [Parameter()]
         [string]$MetadataJsonPath = '',
@@ -35,6 +38,9 @@ function Publish-IntuneWingetApp {
         throw "IntuneWin package not found at: $IntuneWinPath"
     }
 
+    $resolvedPkgPath = (Resolve-Path $IntuneWinPath).Path
+    $fileHash = (Get-FileHash -Path $resolvedPkgPath -Algorithm SHA256).Hash
+
     # 1. Connect to Microsoft Graph with DeviceManagementApps scope
     $token = Connect-GraphToken -Scopes @('https://graph.microsoft.com/DeviceManagementApps.ReadWrite.All')
     $authHeader = @{
@@ -48,7 +54,7 @@ function Publish-IntuneWingetApp {
         $meta = Get-Content $MetadataJsonPath -Raw | ConvertFrom-Json
     } else {
         $meta = [PSCustomObject]@{
-            DisplayName          = [System.IO.Path]::GetFileNameWithoutExtension($IntuneWinPath)
+            DisplayName          = [System.IO.Path]::GetFileNameWithoutExtension($resolvedPkgPath)
             Publisher            = 'Enterprise IT'
             Description          = 'Automated Win32 Package deployed via WingetIntune.'
             InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -56,53 +62,80 @@ function Publish-IntuneWingetApp {
         }
     }
 
+    if (-not $PackageId) {
+        $PackageId = if ($meta.PackageId) { $meta.PackageId } else { [System.IO.Path]::GetFileNameWithoutExtension($resolvedPkgPath) }
+    }
+
+    # Check for existing upload session in C:\ProgramData\WingetIntune\UploadSessions\<PackageId>.json
+    $sessionDir = "C:\ProgramData\WingetIntune\UploadSessions"
+    $sessionFile = Join-Path $sessionDir "$PackageId.json"
+    $resumeSession = $null
+    if (Test-Path $sessionFile) {
+        try {
+            $existing = Get-Content $sessionFile -Raw | ConvertFrom-Json
+            if ($existing.FileDigest -eq $fileHash -and $existing.AppId -and $existing.ContentVersionId -and $existing.FileId) {
+                $resumeSession = $existing
+                Write-Host "  [+] Found active upload session for '$PackageId' (App: $($existing.AppId), Version: $($existing.ContentVersionId))." -ForegroundColor Cyan
+            }
+        } catch { }
+    }
+
     # 3. Read Detection Script content
     $detectionScriptBase64 = ''
-    $detectFile = Join-Path (Split-Path $IntuneWinPath -Parent) 'Detect.ps1'
+    $detectFile = Join-Path (Split-Path $resolvedPkgPath -Parent) 'Detect.ps1'
     if (Test-Path $detectFile) {
         $scriptBytes = [System.IO.File]::ReadAllBytes($detectFile)
         $detectionScriptBase64 = [Convert]::ToBase64String($scriptBytes)
     }
 
-    # 4. Create win32LobApp in Microsoft Graph
+    # 4. Create or reuse win32LobApp in Microsoft Graph
     $appName = $meta.DisplayName
-    Write-Host "  [+] Creating Win32 App entity in Microsoft Intune: '$appName'..." -ForegroundColor Cyan
-    $appPayload = @{
-        '@odata.type'                    = '#microsoft.graph.win32LobApp'
-        displayName                      = $meta.DisplayName
-        description                      = $meta.Description
-        publisher                        = $meta.Publisher
-        installCommandLine               = $meta.InstallCommandLine
-        uninstallCommandLine             = $meta.UninstallCommandLine
-        applicableArchitectures          = 'x64'
-        minimumSupportedOperatingSystem  = @{
-            v10_19041 = $true
-        }
-    }
+    $appId = $null
+    $appObj = $null
 
-    if ($detectionScriptBase64) {
-        $appPayload['detectionRules'] = @(
-            @{
-                '@odata.type'           = '#microsoft.graph.win32LobAppPowerShellScriptDetection'
-                scriptContent           = $detectionScriptBase64
-                enforceSignatureCheck   = $false
-                runAs32Bit              = $false
+    if ($resumeSession -and $resumeSession.AppId) {
+        $appId = $resumeSession.AppId
+        Write-Host "  [+] Reusing existing Win32 App entity (App ID: $appId)..." -ForegroundColor Cyan
+    } else {
+        Write-Host "  [+] Creating Win32 App entity in Microsoft Intune: '$appName'..." -ForegroundColor Cyan
+        $appPayload = @{
+            '@odata.type'                    = '#microsoft.graph.win32LobApp'
+            displayName                      = $meta.DisplayName
+            description                      = $meta.Description
+            publisher                        = $meta.Publisher
+            installCommandLine               = $meta.InstallCommandLine
+            uninstallCommandLine             = $meta.UninstallCommandLine
+            applicableArchitectures          = 'x64'
+            minimumSupportedOperatingSystem  = @{
+                v10_19041 = $true
             }
-        )
-    }
+        }
 
-    $createUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps"
-    $appObj = Invoke-ResilientGraphRest -Uri $createUri -Method POST -Headers $authHeader -Body $appPayload
-    $appId = $appObj.id
-    Write-Host "  [OK] App entity created successfully! (App ID: $appId)" -ForegroundColor Green
+        if ($detectionScriptBase64) {
+            $appPayload['detectionRules'] = @(
+                @{
+                    '@odata.type'           = '#microsoft.graph.win32LobAppPowerShellScriptDetection'
+                    scriptContent           = $detectionScriptBase64
+                    enforceSignatureCheck   = $false
+                    runAs32Bit              = $false
+                }
+            )
+        }
+
+        $createUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps"
+        $appObj = Invoke-ResilientGraphRest -Uri $createUri -Method POST -Headers $authHeader -Body $appPayload
+        $appId = $appObj.id
+        Write-Host "  [OK] App entity created successfully! (App ID: $appId)" -ForegroundColor Green
+    }
 
     # 5. Extract detection.xml encryption metadata from .intunewin (ZIP)
     Write-Host "  [+] Extracting package encryption metadata..." -ForegroundColor Cyan
     $tempZip = Join-Path $env:TEMP ("IntuneWinExtract_" + [Guid]::NewGuid().ToString('N'))
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($IntuneWinPath, $tempZip)
+    [System.IO.Compression.ZipFile]::ExtractToDirectory($resolvedPkgPath, $tempZip)
     $detectionXmlPath = Join-Path $tempZip 'Contents\detection.xml'
 
     if (-not (Test-Path $detectionXmlPath)) {
+        Remove-Item -Path $tempZip -Recurse -Force -ErrorAction SilentlyContinue
         throw "Invalid .intunewin package: missing Contents\detection.xml."
     }
 
@@ -111,117 +144,149 @@ function Publish-IntuneWingetApp {
     $fileName = $doc.ApplicationInfo.FileName
     $unencryptedSize = [int64]$doc.ApplicationInfo.UnencryptedContentSize
 
-    # 6. Create Content Version
-    Write-Host "  [+] Creating Intune Content Version..." -ForegroundColor Cyan
-    $versionUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions"
-    $versionObj = Invoke-ResilientGraphRest -Uri $versionUri -Method POST -Headers $authHeader -Body @{}
-    $versionId = $versionObj.id
+    try {
+        $versionId = $null
+        $fileId = $null
+        $azureSasUri = $null
 
-    # 7. Create File Entry in Graph
-    Write-Host "  [+] Registering file entry in Microsoft Graph..." -ForegroundColor Cyan
-    $fileUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files"
-    $filePayload = @{
-        '@odata.type'            = '#microsoft.graph.mobileAppContentFile'
-        name                     = $fileName
-        size                     = (Get-Item $IntuneWinPath).Length
-        sizeEncrypted            = (Get-Item $IntuneWinPath).Length
-        manifest                 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($detectionXmlPath))
-        isDependency             = $false
-    }
-
-    $fileObj = Invoke-ResilientGraphRest -Uri $fileUri -Method POST -Headers $authHeader -Body $filePayload
-    $fileId = $fileObj.id
-
-    # 8. Poll for Azure Storage SAS URI
-    Write-Host "  [+] Requesting Azure Storage SAS upload URI from Intune..." -ForegroundColor Cyan
-    $fileStatusUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId"
-    $azureSasUri = $null
-
-    for ($i = 0; $i -lt 30; $i++) {
-        Start-Sleep -Seconds 3
-        $fileState = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
-        if ($fileState.azureStorageUri) {
-            $azureSasUri = $fileState.azureStorageUri
-            break
+        if ($resumeSession -and $resumeSession.ContentVersionId -and $resumeSession.FileId) {
+            $versionId = $resumeSession.ContentVersionId
+            $fileId = $resumeSession.FileId
+            $fileStatusUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId"
+            try {
+                $fileState = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
+                if ($fileState.uploadState -ne 'failed' -and $fileState.uploadState -ne 'timedOut' -and $fileState.azureStorageUri) {
+                    $azureSasUri = $fileState.azureStorageUri
+                }
+            } catch { }
         }
-    }
 
-    if (-not $azureSasUri) {
-        throw "Timed out waiting for Azure Storage upload SAS URI from Intune."
-    }
+        if (-not $versionId -or -not $fileId -or -not $azureSasUri) {
+            # 6. Create Content Version
+            Write-Host "  [+] Creating Intune Content Version..." -ForegroundColor Cyan
+            $versionUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions"
+            $versionObj = Invoke-ResilientGraphRest -Uri $versionUri -Method POST -Headers $authHeader -Body @{}
+            $versionId = $versionObj.id
 
-    # 9. Upload Chunked Blocks to Azure Storage with Durable State Machine
-    Send-AzureBlockBlob -FilePath $IntuneWinPath -SasUri $azureSasUri
-
-    # 10. Commit File in Microsoft Graph
-    Write-Host "  [+] Submitting file commit action to Microsoft Graph..." -ForegroundColor Cyan
-    $commitUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId/commit"
-    $commitPayload = @{
-        fileEncryptionInfo = @{
-            encryptionKey          = $encInfo.EncryptionKey
-            macKey                 = $encInfo.MacKey
-            initializationVector   = $encInfo.InitializationVector
-            mac                    = $encInfo.Mac
-            profileIdentifier      = $encInfo.ProfileIdentifier
-            fileDigest             = $encInfo.FileDigest
-            fileDigestAlgorithm    = $encInfo.FileDigestAlgorithm
-        }
-    }
-
-    Invoke-ResilientGraphRest -Uri $commitUri -Method POST -Headers $authHeader -Body $commitPayload | Out-Null
-
-    # 11. Wait for Intune Server-Side Processing to reach Terminal Success State
-    Write-Host "  [+] Waiting for Intune server-side processing & metadata validation..." -NoNewline -ForegroundColor Cyan
-    $procSw = [System.Diagnostics.Stopwatch]::StartNew()
-    $fileCommitted = $false
-
-    while ($procSw.Elapsed.TotalMinutes -lt $ProcessingTimeoutMinutes) {
-        Start-Sleep -Seconds 10
-        Write-Host "." -NoNewline -ForegroundColor Cyan
-
-        try {
-            $fileStatus = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
-            $state = $fileStatus.uploadState
-
-            # Check for terminal success states
-            if ($state -eq 'succeeded' -or $state -eq 'commitFileSuccess' -or ($fileStatus.sizeEncrypted -gt 0 -and $fileStatus.isCommitted)) {
-                $fileCommitted = $true
-                Write-Host "`n  [OK] Intune file processing complete (State: $state, Encrypted Size: $($fileStatus.sizeEncrypted) bytes)." -ForegroundColor Green
-                break
+            # 7. Create File Entry in Graph
+            Write-Host "  [+] Registering file entry in Microsoft Graph..." -ForegroundColor Cyan
+            $fileUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files"
+            $filePayload = @{
+                '@odata.type'            = '#microsoft.graph.mobileAppContentFile'
+                name                     = $fileName
+                size                     = (Get-Item $resolvedPkgPath).Length
+                sizeEncrypted            = (Get-Item $resolvedPkgPath).Length
+                manifest                 = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($detectionXmlPath))
+                isDependency             = $false
             }
-            elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed' -or $state -eq 'failed') {
-                throw "Intune server-side processing failed with uploadState: $state"
+
+            $fileObj = Invoke-ResilientGraphRest -Uri $fileUri -Method POST -Headers $authHeader -Body $filePayload
+            $fileId = $fileObj.id
+
+            # 8. Poll for Azure Storage SAS URI
+            Write-Host "  [+] Requesting Azure Storage SAS upload URI from Intune..." -ForegroundColor Cyan
+            $fileStatusUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId"
+            $azureSasUri = $null
+
+            for ($i = 0; $i -lt 30; $i++) {
+                Start-Sleep -Seconds 3
+                $fileState = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
+                if ($fileState.azureStorageUri) {
+                    $azureSasUri = $fileState.azureStorageUri
+                    break
+                }
             }
-        } catch {
-            if ($_.Exception.Message -match 'failed') { throw $_ }
+
+            if (-not $azureSasUri) {
+                throw "Timed out waiting for Azure Storage upload SAS URI from Intune."
+            }
         }
-    }
-    $procSw.Stop()
 
-    if (-not $fileCommitted) {
-        Write-Warning "`nFile processing timed out after $ProcessingTimeoutMinutes minutes. Proceeding with content version binding."
-    }
+        # 9. Upload Chunked Blocks to Azure Storage with Durable State Machine
+        Send-AzureBlockBlob -FilePath $resolvedPkgPath `
+                            -SasUri $azureSasUri `
+                            -PackageId $PackageId `
+                            -AppId $appId `
+                            -ContentVersionId $versionId `
+                            -FileId $fileId `
+                            -FileDigest $fileHash `
+                            -Resume
 
-    # 12. Bind Committed Content Version to Mobile App
-    Write-Host "  [+] Binding Content Version to Mobile App..." -ForegroundColor Cyan
-    $updateAppUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId"
-    $updateAppPayload = @{
-        '@odata.type'               = '#microsoft.graph.win32LobApp'
-        committedContentVersion     = $versionId
-    }
-    Invoke-ResilientGraphRest -Uri $updateAppUri -Method PATCH -Headers $authHeader -Body $updateAppPayload | Out-Null
-
-    # Cleanup temp extraction
-    Remove-Item -Path $tempZip -Recurse -Force -ErrorAction SilentlyContinue
-
-    Write-Host "  [OK] App '$appName' successfully published to Intune!" -ForegroundColor Green
-
-    # 13. Handle Group Assignments
-    if ($AssignTo -and $AssignTo.Count -gt 0) {
-        foreach ($group in $AssignTo) {
-            Add-IntuneWingetAssignment -AppId $appId -GroupId $group -Intent $Intent
+        # 10. Commit File in Microsoft Graph
+        Write-Host "  [+] Submitting file commit action to Microsoft Graph..." -ForegroundColor Cyan
+        $commitUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId/commit"
+        $commitPayload = @{
+            fileEncryptionInfo = @{
+                encryptionKey          = $encInfo.EncryptionKey
+                macKey                 = $encInfo.MacKey
+                initializationVector   = $encInfo.InitializationVector
+                mac                    = $encInfo.Mac
+                profileIdentifier      = $encInfo.ProfileIdentifier
+                fileDigest             = $encInfo.FileDigest
+                fileDigestAlgorithm    = $encInfo.FileDigestAlgorithm
+            }
         }
-    }
 
-    return $appObj
+        Invoke-ResilientGraphRest -Uri $commitUri -Method POST -Headers $authHeader -Body $commitPayload | Out-Null
+
+        # 11. Wait for Intune Server-Side Processing to reach Terminal Success State
+        Write-Host "  [+] Waiting for Intune server-side processing & metadata validation..." -NoNewline -ForegroundColor Cyan
+        $procSw = [System.Diagnostics.Stopwatch]::StartNew()
+        $fileCommitted = $false
+
+        while ($procSw.Elapsed.TotalMinutes -lt $ProcessingTimeoutMinutes) {
+            Start-Sleep -Seconds 10
+            Write-Host "." -NoNewline -ForegroundColor Cyan
+
+            try {
+                $fileStatus = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
+                $state = $fileStatus.uploadState
+
+                # Check for terminal success states
+                if ($state -eq 'succeeded' -or $state -eq 'commitFileSuccess' -or ($fileStatus.sizeEncrypted -gt 0 -and $fileStatus.isCommitted)) {
+                    $fileCommitted = $true
+                    Write-Host "`n  [OK] Intune file processing complete (State: $state, Encrypted Size: $($fileStatus.sizeEncrypted) bytes)." -ForegroundColor Green
+                    break
+                }
+                elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed' -or $state -eq 'failed') {
+                    throw "Intune server-side processing failed with uploadState: $state"
+                }
+            } catch {
+                if ($_.Exception.Message -match 'failed') { throw $_ }
+            }
+        }
+        $procSw.Stop()
+
+        if (-not $fileCommitted) {
+            Write-Warning "`nFile processing timed out after $ProcessingTimeoutMinutes minutes. Proceeding with content version binding."
+        }
+
+        # 12. Bind Committed Content Version to Mobile App
+        Write-Host "  [+] Binding Content Version to Mobile App..." -ForegroundColor Cyan
+        $updateAppUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId"
+        $updateAppPayload = @{
+            '@odata.type'               = '#microsoft.graph.win32LobApp'
+            committedContentVersion     = $versionId
+        }
+        Invoke-ResilientGraphRest -Uri $updateAppUri -Method PATCH -Headers $authHeader -Body $updateAppPayload | Out-Null
+
+        Write-Host "  [OK] App '$appName' successfully published to Intune!" -ForegroundColor Green
+
+        # 13. Handle Group Assignments
+        if ($AssignTo -and $AssignTo.Count -gt 0) {
+            foreach ($group in $AssignTo) {
+                Add-IntuneWingetAssignment -AppId $appId -GroupId $group -Intent $Intent
+            }
+        }
+
+        if (-not $appObj) {
+            $appObj = Invoke-ResilientGraphRest -Uri "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId" -Method GET -Headers $authHeader
+        }
+
+        return $appObj
+    }
+    finally {
+        # Cleanup temp extraction
+        Remove-Item -Path $tempZip -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

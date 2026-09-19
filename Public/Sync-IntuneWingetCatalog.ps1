@@ -24,7 +24,7 @@ function Sync-IntuneWingetCatalog {
     Write-Host "`n  📊 WingetIntune — Tenant Catalog Lifecycle & Audit Engine" -ForegroundColor Cyan
     Write-Host "  ────────────────────────────────────────────────────────" -ForegroundColor DarkGray
 
-    $token = Connect-MsalToken -Scopes @('https://graph.microsoft.com/DeviceManagementApps.ReadWrite.All')
+    $token = Connect-GraphToken -Scopes @('https://graph.microsoft.com/DeviceManagementApps.ReadWrite.All')
     $authHeader = @{
         'Authorization' = "Bearer $token"
         'Content-Type'  = 'application/json'

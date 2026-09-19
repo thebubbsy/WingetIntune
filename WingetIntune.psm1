@@ -26,7 +26,8 @@ Export-ModuleMember -Function @(
     'Add-IntuneWingetAssignment',
     'New-IntuneRemediation',
     'Sync-IntuneWingetCatalog',
-    'Get-PackageAdapter'
+    'Get-PackageAdapter',
+    'Clear-OrphanedIntuneUploads'
 ) -Alias @(
     'Publish-IntuneWin32App'
 )
