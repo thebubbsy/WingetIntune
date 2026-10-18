@@ -1,10 +1,10 @@
 ﻿{
     "ModuleName":  "WingetIntune",
-    "ModuleVersion":  "1.0.2",
-    "BuildTimestampUtc":  "2026-10-18T13:04:33.8294100Z",
-    "GitCommit":  "bfed0a1",
+    "ModuleVersion":  "1.0.0",
+    "BuildTimestampUtc":  "2026-10-18T19:03:11.4672275Z",
+    "GitCommit":  "a0e9c130",
     "ComponentHashes":  {
-                            "Public\\New-IntuneWingetPackage.ps1":  "EA036EEF771187302C5D25C19381AB9E02C3FCA42D2DBDD5E540E4607B64581B",
+                            "Public\\New-IntuneWingetPackage.ps1":  "AD8442164E67D5E814D8F5BD48F8CA61B0D7C9A02C3CA8C3C327587705689715",
                             "Private\\Send-AzureBlockBlob.ps1":  "6C4F1CBE52C11EF4D188DD9067FEA56866B72865D6EE36E2E3F2076D967919FC",
                             "Private\\New-StandaloneInstallShim.ps1":  "DC7C0FB7E094D8C7DDB4020AC5C2D8EE5DAE1C1D4D17C82A1895893689396B50",
                             "Public\\Clear-OrphanedIntuneUploads.ps1":  "0E82ACB7B60C68C3E261203644347695E09A1660AC9B7F8E21C9549939836C77",
