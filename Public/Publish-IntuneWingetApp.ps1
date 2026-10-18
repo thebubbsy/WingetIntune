@@ -279,6 +279,18 @@ function Publish-IntuneWingetApp {
             }
         }
 
+        $pkgSizeMb = [Math]::Round(((Get-Item $resolvedPkgPath).Length / 1MB), 2)
+        $shortHash = if ($fileHash.Length -ge 12) { $fileHash.Substring(0, 12) + '...' } else { $fileHash }
+        Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  | WingetIntune Cloud Publication Receipt               |" -ForegroundColor Cyan
+        Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  | App Name        : $appName" -ForegroundColor White
+        Write-Host "  | Intune App ID   : $appId" -ForegroundColor Gray
+        Write-Host "  | Content Version : $versionId (File: $fileName)" -ForegroundColor Gray
+        Write-Host "  | Payload Size    : $pkgSizeMb MB (SHA256: $shortHash)" -ForegroundColor Gray
+        Write-Host "  | Assigned Groups : $($AssignTo.Count) ($Intent)" -ForegroundColor Gray
+        Write-Host "  +------------------------------------------------------+`n" -ForegroundColor DarkCyan
+
         if (-not $appObj) {
             $appObj = Invoke-ResilientGraphRest -Uri "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId" -Method GET -Headers $authHeader
         }
