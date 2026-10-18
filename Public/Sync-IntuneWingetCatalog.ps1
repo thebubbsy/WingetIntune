@@ -18,7 +18,13 @@ function Sync-IntuneWingetCatalog {
         [switch]$ReportOnly,
 
         [Parameter()]
-        [switch]$StageCanary
+        [switch]$StageCanary,
+
+        [Parameter()]
+        [string]$Filter = '',
+
+        [Parameter()]
+        [switch]$CopySummary
     )
 
     Write-Host "`n  📊 WingetIntune — Tenant Catalog Lifecycle & Audit Engine" -ForegroundColor Cyan
@@ -39,17 +45,54 @@ function Sync-IntuneWingetCatalog {
 
     if ($appsRes.value) {
         foreach ($app in $appsRes.value) {
+            if ($Filter -and ($app.displayName -notmatch [regex]::Escape($Filter)) -and ($app.publisher -notmatch [regex]::Escape($Filter))) {
+                continue
+            }
+            $modeLabel = if ($StageCanary) { 'Canary-Ready' } elseif ($ReportOnly) { 'Report-Only' } else { 'Audited' }
             $item = [PSCustomObject]@{
                 AppId           = $app.id
                 DisplayName     = $app.displayName
                 Publisher       = $app.publisher
                 CreatedDateTime = $app.createdDateTime
-                Status          = 'Audited'
+                Status          = $modeLabel
             }
             $appAudit.Add($item)
         }
     }
 
-    Write-Host "  [✔] Discovered $($appAudit.Count) Win32 App(s) in Microsoft Intune." -ForegroundColor Green
+    $uniquePublishers = @($appAudit | Select-Object -ExpandProperty Publisher -Unique | Where-Object { $_ }).Count
+    Write-Host "  [✔] Discovered $($appAudit.Count) Win32 App(s) across $uniquePublishers publisher(s) in Microsoft Intune." -ForegroundColor Green
+
+    if ($appAudit.Count -gt 0) {
+        Write-Host ""
+        Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  |  INTUNE WIN32 CATALOG AUDIT TABLE HUD                                          |" -ForegroundColor Cyan
+        Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  |  #   App Name                         Publisher            Status              |" -ForegroundColor Gray
+        Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        $idx = 0
+        foreach ($entry in ($appAudit | Select-Object -First 15)) {
+            $idx++
+            $idxStr  = $idx.ToString().PadRight(3)
+            $nameStr = ([string]$entry.DisplayName).PadRight(32).Substring(0, 32)
+            $pubStr  = ([string]$entry.Publisher).PadRight(20).Substring(0, 20)
+            $statStr = ([string]$entry.Status).PadRight(19).Substring(0, 19)
+            Write-Host ("  |  " + $idxStr + " " + $nameStr + " " + $pubStr + " " + $statStr + " |") -ForegroundColor White
+        }
+        if ($appAudit.Count -gt 15) {
+            $moreMsg = "... and $($appAudit.Count - 15) more Win32 application(s)".PadRight(76)
+            Write-Host ("  |  " + $moreMsg + "  |") -ForegroundColor DarkGray
+        }
+        Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
+    }
+
+    if ($CopySummary -and $appAudit.Count -gt 0) {
+        try {
+            $tsv = "AppId`tDisplayName`tPublisher`tStatus`n" + (($appAudit | ForEach-Object { "$($_.AppId)`t$($_.DisplayName)`t$($_.Publisher)`t$($_.Status)" }) -join "`n")
+            Set-Clipboard -Value $tsv -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Catalog audit summary ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+        } catch { }
+    }
+
     return $appAudit
 }
