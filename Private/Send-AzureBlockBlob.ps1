@@ -45,7 +45,10 @@ function Send-AzureBlockBlob {
         [int]$MaxRetries = 5,
 
         [Parameter()]
-        [switch]$Resume
+        [switch]$Resume,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
     if (-not (Test-Path $FilePath)) {
@@ -99,7 +102,9 @@ function Send-AzureBlockBlob {
                     Remove-Item -Path $sessionFile -Force -ErrorAction SilentlyContinue
                     $existingSession = $null
                 } else {
-                    Write-Host "  [+] Pre-Resume SHA256 integrity verified ($fileHash). Resuming transaction..." -ForegroundColor Green
+                    if (-not $Quiet) {
+                        Write-Host "  [+] Pre-Resume SHA256 integrity verified ($fileHash). Resuming transaction..." -ForegroundColor Green
+                    }
                 }
             }
         } catch {
@@ -112,6 +117,7 @@ function Send-AzureBlockBlob {
     $serverBlockIds = [System.Collections.Generic.HashSet[string]]::new()
     $separator = if ($SasUri -match '\?') { '&' } else { '?' }
     $blockListUri = $SasUri + $separator + "comp=blocklist&blocklisttype=all"
+    $alreadyUploaded = 0
 
     try {
         $blReq = [System.Net.HttpWebRequest]::Create($blockListUri)
@@ -141,7 +147,7 @@ function Send-AzureBlockBlob {
         }
 
         $alreadyUploaded = @($blockMap | Where-Object { $_.Status -eq 'Uploaded' }).Count
-        if ($alreadyUploaded -gt 0) {
+        if ($alreadyUploaded -gt 0 -and -not $Quiet) {
             Write-Host "  [+] Authoritative Server Reconciliation: $alreadyUploaded/$totalBlocks blocks already verified on Azure Storage." -ForegroundColor Yellow
         }
     }
@@ -181,11 +187,15 @@ function Send-AzureBlockBlob {
 
     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
 
-    Write-Host "  [+] Uploading $($fileItem.Name) ($([Math]::Round($fileLength / 1MB, 2)) MB across $totalBlocks blocks)..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [+] Uploading $($fileItem.Name) ($([Math]::Round($fileLength / 1MB, 2)) MB across $totalBlocks blocks)..." -ForegroundColor Cyan
+    }
 
     # 8. Upload Pending Blocks
     $fileStream = [System.IO.File]::OpenRead($resolvedPath)
     $buffer = New-Object byte[] $chunkSizeBytes
+    $uploadSw = [System.Diagnostics.Stopwatch]::StartNew()
+    $bytesTransferredThisRun = [int64]0
 
     try {
         for ($i = 0; $i -lt $totalBlocks; $i++) {
@@ -229,6 +239,7 @@ function Send-AzureBlockBlob {
                     $response = $request.GetResponse()
                     $response.Close()
                     $uploaded = $true
+                    $bytesTransferredThisRun += $bytesRead
 
                     # Confirmed upload
                     $currentBlock.Status = 'Uploaded'
@@ -277,11 +288,14 @@ function Send-AzureBlockBlob {
     }
     finally {
         $fileStream.Close()
+        $uploadSw.Stop()
         Write-Progress -Activity "Uploading to Azure Block Blob" -Completed
     }
 
     # 9. Commit Ordered Block List
-    Write-Host "  [+] Committing full block list to Azure Storage..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [+] Committing full block list to Azure Storage..." -ForegroundColor Cyan
+    }
     $commitUri = $SasUri + $separator + "comp=blocklist"
 
     $xmlBuilder = New-Object System.Text.StringBuilder
@@ -310,6 +324,22 @@ function Send-AzureBlockBlob {
     $session.LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
 
-    Write-Host "  [OK] Azure Block Blob commit confirmed!" -ForegroundColor Green
+    if (-not $Quiet) {
+        $elapsedSec = [Math]::Max(0.1, $uploadSw.Elapsed.TotalSeconds)
+        $mbps = [Math]::Round(($bytesTransferredThisRun / 1MB) / $elapsedSec, 2)
+        $totalMb = [Math]::Round($fileLength / 1MB, 2)
+        $newBlocks = $totalBlocks - $alreadyUploaded
+        $shortHash = if ($fileHash.Length -ge 16) { $fileHash.Substring(0, 16) + '...' } else { $fileHash }
+        Write-Host "  [##########] 100% | Azure Block Blob Commit Confirmed ($totalBlocks/$totalBlocks blocks, $mbps MB/s)" -ForegroundColor Green
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
+        Write-Host "  | AZURE STORAGE BLOCK BLOB COMMIT RECEIPT                 [COMMITTED]  |" -ForegroundColor Green
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
+        Write-Host ("  | File Name     : {0,-52} |" -f $fileItem.Name) -ForegroundColor White
+        Write-Host ("  | Payload Size  : {0,-52} |" -f "$totalMb MB ($fileLength bytes)") -ForegroundColor Gray
+        Write-Host ("  | Block Summary : {0,-52} |" -f "$totalBlocks total ($newBlocks uploaded, $alreadyUploaded resumed)") -ForegroundColor Cyan
+        Write-Host ("  | Throughput    : {0,-52} |" -f "$mbps MB/s ($([Math]::Round($elapsedSec, 1))s transfer)") -ForegroundColor Gray
+        Write-Host ("  | SHA-256       : {0,-52} |" -f $shortHash) -ForegroundColor Gray
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
+    }
     return $true
 }

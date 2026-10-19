@@ -28,11 +28,19 @@ function Publish-IntuneWingetApp {
         [string]$Intent = 'Required',
 
         [Parameter()]
-        [int]$ProcessingTimeoutMinutes = 15
+        [int]$ProcessingTimeoutMinutes = 15,
+
+        [Parameter()]
+        [switch]$CopyReceipt,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
-    Write-Host "`n  [WingetIntune] Microsoft Graph Win32 App Cloud Publisher" -ForegroundColor Cyan
-    Write-Host "  --------------------------------------------------------" -ForegroundColor DarkGray
+    if (-not $Quiet) {
+        Write-Host "`n  [WingetIntune] Microsoft Graph Win32 App Cloud Publisher" -ForegroundColor Cyan
+        Write-Host "  --------------------------------------------------------" -ForegroundColor DarkGray
+    }
 
     if (-not (Test-Path $IntuneWinPath)) {
         throw "IntuneWin package not found at: $IntuneWinPath"
@@ -210,10 +218,13 @@ function Publish-IntuneWingetApp {
                             -ContentVersionId $versionId `
                             -FileId $fileId `
                             -FileDigest $fileHash `
-                            -Resume
+                            -Resume `
+                            -Quiet:$Quiet
 
         # 10. Commit File in Microsoft Graph
-        Write-Host "  [+] Submitting file commit action to Microsoft Graph..." -ForegroundColor Cyan
+        if (-not $Quiet) {
+            Write-Host "  [+] Submitting file commit action to Microsoft Graph..." -ForegroundColor Cyan
+        }
         $commitUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId/contentVersions/$versionId/files/$fileId/commit"
         $commitPayload = @{
             fileEncryptionInfo = @{
@@ -230,13 +241,17 @@ function Publish-IntuneWingetApp {
         Invoke-ResilientGraphRest -Uri $commitUri -Method POST -Headers $authHeader -Body $commitPayload | Out-Null
 
         # 11. Wait for Intune Server-Side Processing to reach Terminal Success State
-        Write-Host "  [+] Waiting for Intune server-side processing & metadata validation..." -NoNewline -ForegroundColor Cyan
+        if (-not $Quiet) {
+            Write-Host "  [+] Waiting for Intune server-side processing & metadata validation..." -NoNewline -ForegroundColor Cyan
+        }
         $procSw = [System.Diagnostics.Stopwatch]::StartNew()
         $fileCommitted = $false
 
         while ($procSw.Elapsed.TotalMinutes -lt $ProcessingTimeoutMinutes) {
             Start-Sleep -Seconds 10
-            Write-Host "." -NoNewline -ForegroundColor Cyan
+            if (-not $Quiet) {
+                Write-Host "." -NoNewline -ForegroundColor Cyan
+            }
 
             try {
                 $fileStatus = Invoke-ResilientGraphRest -Uri $fileStatusUri -Method GET -Headers $authHeader
@@ -245,7 +260,9 @@ function Publish-IntuneWingetApp {
                 # Check for terminal success states
                 if ($state -eq 'succeeded' -or $state -eq 'commitFileSuccess' -or ($fileStatus.sizeEncrypted -gt 0 -and $fileStatus.isCommitted)) {
                     $fileCommitted = $true
-                    Write-Host "`n  [OK] Intune file processing complete (State: $state, Encrypted Size: $($fileStatus.sizeEncrypted) bytes)." -ForegroundColor Green
+                    if (-not $Quiet) {
+                        Write-Host "`n  [OK] Intune file processing complete (State: $state, Encrypted Size: $($fileStatus.sizeEncrypted) bytes)." -ForegroundColor Green
+                    }
                     break
                 }
                 elseif ($state -eq 'commitFileFailed' -or $state -eq 'azureStorageUriRequestFailed' -or $state -eq 'failed') {
@@ -262,7 +279,9 @@ function Publish-IntuneWingetApp {
         }
 
         # 12. Bind Committed Content Version to Mobile App
-        Write-Host "  [+] Binding Content Version to Mobile App..." -ForegroundColor Cyan
+        if (-not $Quiet) {
+            Write-Host "  [+] Binding Content Version to Mobile App..." -ForegroundColor Cyan
+        }
         $updateAppUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId"
         $updateAppPayload = @{
             '@odata.type'               = '#microsoft.graph.win32LobApp'
@@ -270,26 +289,50 @@ function Publish-IntuneWingetApp {
         }
         Invoke-ResilientGraphRest -Uri $updateAppUri -Method PATCH -Headers $authHeader -Body $updateAppPayload | Out-Null
 
-        Write-Host "  [OK] App '$appName' successfully published to Intune!" -ForegroundColor Green
+        if (-not $Quiet) {
+            Write-Host "  [OK] App '$appName' successfully published to Intune!" -ForegroundColor Green
+        }
 
         # 13. Handle Group Assignments
         if ($AssignTo -and $AssignTo.Count -gt 0) {
             foreach ($group in $AssignTo) {
-                Add-IntuneWingetAssignment -AppId $appId -GroupId $group -Intent $Intent
+                Add-IntuneWingetAssignment -AppId $appId -GroupId $group -Intent $Intent -Quiet:$Quiet
             }
         }
 
         $pkgSizeMb = [Math]::Round(((Get-Item $resolvedPkgPath).Length / 1MB), 2)
         $shortHash = if ($fileHash.Length -ge 12) { $fileHash.Substring(0, 12) + '...' } else { $fileHash }
-        Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
-        Write-Host "  | WingetIntune Cloud Publication Receipt               |" -ForegroundColor Cyan
-        Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
-        Write-Host "  | App Name        : $appName" -ForegroundColor White
-        Write-Host "  | Intune App ID   : $appId" -ForegroundColor Gray
-        Write-Host "  | Content Version : $versionId (File: $fileName)" -ForegroundColor Gray
-        Write-Host "  | Payload Size    : $pkgSizeMb MB (SHA256: $shortHash)" -ForegroundColor Gray
-        Write-Host "  | Assigned Groups : $($AssignTo.Count) ($Intent)" -ForegroundColor Gray
-        Write-Host "  +------------------------------------------------------+`n" -ForegroundColor DarkCyan
+        if (-not $Quiet) {
+            Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
+            Write-Host "  | WingetIntune Cloud Publication Receipt               |" -ForegroundColor Cyan
+            Write-Host "  +------------------------------------------------------+" -ForegroundColor DarkCyan
+            Write-Host "  | App Name        : $appName" -ForegroundColor White
+            Write-Host "  | Intune App ID   : $appId" -ForegroundColor Gray
+            Write-Host "  | Content Version : $versionId (File: $fileName)" -ForegroundColor Gray
+            Write-Host "  | Payload Size    : $pkgSizeMb MB (SHA256: $shortHash)" -ForegroundColor Gray
+            Write-Host "  | Assigned Groups : $($AssignTo.Count) ($Intent)" -ForegroundColor Gray
+            Write-Host "  +------------------------------------------------------+`n" -ForegroundColor DarkCyan
+        }
+
+        if ($CopyReceipt) {
+            try {
+                $mdReceipt = @(
+                    "### WingetIntune Cloud Publication Receipt: $appName",
+                    "| Field | Value |",
+                    "| :--- | :--- |",
+                    "| **App Name** | ``$appName`` |",
+                    "| **Intune App ID** | ``$appId`` |",
+                    "| **Content Version** | ``$versionId`` ($fileName) |",
+                    "| **Payload Size** | $pkgSizeMb MB |",
+                    "| **SHA-256 Digest** | ``$fileHash`` |",
+                    "| **Assigned Groups** | $($AssignTo.Count) ($Intent) |"
+                ) -join "`r`n"
+                Set-Clipboard -Value $mdReceipt -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied Markdown Cloud Publication Receipt to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
 
         if (-not $appObj) {
             $appObj = Invoke-ResilientGraphRest -Uri "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$appId" -Method GET -Headers $authHeader
