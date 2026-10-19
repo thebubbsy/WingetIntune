@@ -28,11 +28,16 @@ function Clear-OrphanedIntuneUploads {
         [switch]$PurgeGraphContentFiles,
 
         [Parameter()]
-        [switch]$PassThru
+        [switch]$PassThru,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
-    Write-Host "`n  [WingetIntune] Orphaned Upload & Session Cleanup Engine" -ForegroundColor Cyan
-    Write-Host "  -------------------------------------------------------" -ForegroundColor DarkGray
+    if (-not $Quiet) {
+        Write-Host "`n  [WingetIntune] Orphaned Upload & Session Cleanup Engine" -ForegroundColor Cyan
+        Write-Host "  -------------------------------------------------------" -ForegroundColor DarkGray
+    }
 
     $sessionDir = "C:\ProgramData\WingetIntune\UploadSessions"
     $purgedItems = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -96,7 +101,7 @@ function Clear-OrphanedIntuneUploads {
                             PurgedUtc    = $nowUtc.ToString('o')
                         }
                         $purgedItems.Add($purgedItem)
-                        Write-Host "  [✔] Purged stale session: $($file.Name) ($reason)" -ForegroundColor Yellow
+                        Write-Host "  [OK] Purged stale session: $($file.Name) ($reason)" -ForegroundColor Yellow
                     }
                     catch {
                         Write-Warning "Failed to delete session file '$($file.FullName)': $($_.Exception.Message)"
@@ -145,7 +150,7 @@ function Clear-OrphanedIntuneUploads {
                                                 PurgedUtc        = $nowUtc.ToString('o')
                                             }
                                             $purgedItems.Add($purgedItem)
-                                            Write-Host "  [✔] Identified dead Graph file: App $appId / Version $verId / File $($f.id) ($($f.uploadState))" -ForegroundColor Yellow
+                                            Write-Host "  [OK] Identified dead Graph file: App $appId / Version $verId / File $($f.id) ($($f.uploadState))" -ForegroundColor Yellow
                                         }
                                     }
                                 }
@@ -160,7 +165,21 @@ function Clear-OrphanedIntuneUploads {
         }
     }
 
-    Write-Host "  [OK] Orphan cleanup completed. $($purgedItems.Count) item(s) purged." -ForegroundColor Green
+    if (-not $Quiet) {
+        $localPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'LocalSessionFile' }).Count
+        $graphPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'GraphContentFile' }).Count
+        Write-Host ""
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  |  [WingetIntune] Orphaned Session & Upload Cleanup Summary        |" -ForegroundColor Cyan
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  |  Max Age Floor        : {0,-41}|" -f ("$MaxAgeHours hour(s)")) -ForegroundColor Gray
+        Write-Host ("  |  Local Sessions Purged: {0,-41}|" -f $localPurgedCount) -ForegroundColor Gray
+        Write-Host ("  |  Graph Content Purged : {0,-41}|" -f $graphPurgedCount) -ForegroundColor Gray
+        Write-Host ("  |  Total Items Purged   : {0,-41}|" -f $purgedItems.Count) -ForegroundColor Green
+        Write-Host ("  |  Completed At (UTC)   : {0,-41}|" -f $nowUtc.ToString('yyyy-MM-dd HH:mm:ss')) -ForegroundColor Gray
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  [OK] Orphan cleanup completed. $($purgedItems.Count) item(s) purged." -ForegroundColor Green
+    }
 
     if ($PassThru) {
         return $purgedItems

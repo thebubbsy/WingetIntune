@@ -23,7 +23,13 @@ function New-IntuneRemediation {
         [string]$MinVersion = '',
 
         [Parameter()]
-        [string]$OutputFolder = ''
+        [string]$OutputFolder = '',
+
+        [Parameter()]
+        [switch]$CopySummary,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
     if (-not $OutputFolder) {
@@ -83,11 +89,55 @@ function New-IntuneRemediation {
     $detectLines | Out-File -FilePath $detectFile -Force -Encoding utf8
     $remediateLines | Out-File -FilePath $remediateFile -Force -Encoding utf8
 
-    Write-Host "  [OK] Proactive Remediation scripts generated in: $OutputFolder" -ForegroundColor Green
+    $detectHash = try { (Get-FileHash -Path $detectFile -Algorithm SHA256 -ErrorAction Stop).Hash } catch { 'N/A' }
+    $remediateHash = try { (Get-FileHash -Path $remediateFile -Algorithm SHA256 -ErrorAction Stop).Hash } catch { 'N/A' }
+    $detectBytes = try { (Get-Item -Path $detectFile -ErrorAction Stop).Length } catch { 0 }
+    $remediateBytes = try { (Get-Item -Path $remediateFile -ErrorAction Stop).Length } catch { 0 }
+
+    if (-not $Quiet) {
+        $floorLabel = if ($MinVersion) { $MinVersion } else { 'Latest (Any Installed)' }
+        $shortDetectHash = if ($detectHash.Length -ge 16) { $detectHash.Substring(0, 16) + '...' } else { $detectHash }
+        $shortRemHash = if ($remediateHash.Length -ge 16) { $remediateHash.Substring(0, 16) + '...' } else { $remediateHash }
+        $outDirDisplay = if ($OutputFolder.Length -gt 46) { '...' + $OutputFolder.Substring($OutputFolder.Length - 43) } else { $OutputFolder }
+
+        Write-Host ""
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  |  [WingetIntune] Proactive Remediation Build Receipt              |" -ForegroundColor Cyan
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  |  Package ID    : {0,-48}|" -f $PackageId) -ForegroundColor White
+        Write-Host ("  |  Version Floor : {0,-48}|" -f $floorLabel) -ForegroundColor Gray
+        Write-Host ("  |  Detect.ps1    : {0,-48}|" -f ("$detectBytes B (SHA256: $shortDetectHash)")) -ForegroundColor Green
+        Write-Host ("  |  Remediate.ps1 : {0,-48}|" -f ("$remediateBytes B (SHA256: $shortRemHash)")) -ForegroundColor Green
+        Write-Host ("  |  Run Context   : {0,-48}|" -f 'SYSTEM (64-bit PowerShell Host)') -ForegroundColor Gray
+        Write-Host ("  |  Output Folder : {0,-48}|" -f $outDirDisplay) -ForegroundColor Gray
+        Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  [OK] Proactive Remediation scripts generated in: $OutputFolder" -ForegroundColor Green
+    }
+
+    if ($CopySummary) {
+        $mdSummary = @(
+            "### Intune Proactive Remediation - $PackageId",
+            "- **Version Floor**: $(if ($MinVersion) { $MinVersion } else { 'Any Installed' })",
+            "- **Detect Script**: '$detectFile' ($detectBytes B | SHA256: $detectHash)",
+            "- **Remediate Script**: '$remediateFile' ($remediateBytes B | SHA256: $remediateHash)",
+            "- **Recommended Settings**: Run as SYSTEM, 64-bit PowerShell = Yes, Enforce Signature Check = No"
+        ) -join [Environment]::NewLine
+        try {
+            Set-Clipboard -Value $mdSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Proactive Remediation deployment summary to clipboard." -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
+        }
+    }
+
     return [PSCustomObject]@{
         PackageId           = $PackageId
         MinVersion          = $MinVersion
         DetectScriptPath    = $detectFile
         RemediateScriptPath = $remediateFile
+        DetectSha256        = $detectHash
+        RemediateSha256     = $remediateHash
     }
 }
