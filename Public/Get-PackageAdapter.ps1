@@ -12,7 +12,10 @@ function Get-PackageAdapter {
         [string]$InstallerType,
 
         [Parameter()]
-        [object]$Manifest
+        [object]$Manifest,
+
+        [Parameter()]
+        [switch]$ShowCard
     )
 
     $normalized = $InstallerType.Trim().ToLowerInvariant()
@@ -37,10 +40,10 @@ function Get-PackageAdapter {
         }
     }
 
-    switch ($normalized) {
+    $adapter = switch ($normalized) {
         'msi' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/qn REBOOT=ReallySuppress' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'msi'
                 SilentArgs           = $silent
                 InstallCommandLine   = "msiexec.exe /i `"installer.msi`" $silent"
@@ -54,7 +57,7 @@ function Get-PackageAdapter {
         }
         'inno' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'inno'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -67,7 +70,7 @@ function Get-PackageAdapter {
         }
         'nullsoft' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/S' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'nullsoft'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -80,7 +83,7 @@ function Get-PackageAdapter {
         }
         'wix' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/quiet /norestart' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'wix'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -93,7 +96,7 @@ function Get-PackageAdapter {
         }
         'burn' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/quiet /norestart' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'burn'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -106,7 +109,7 @@ function Get-PackageAdapter {
         }
         'electron' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '--allusers --force-install /silent /VERYSILENT /SUPPRESSMSGBOXES /NORESTART' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'electron'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -119,7 +122,7 @@ function Get-PackageAdapter {
         }
         'chromium' {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '--system-level --allusers --force-install /silent /qn' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'chromium'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -131,7 +134,7 @@ function Get-PackageAdapter {
             }
         }
         'msix' {
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'msix'
                 SilentArgs           = ''
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -144,7 +147,7 @@ function Get-PackageAdapter {
         }
         Default {
             $silent = if ($customSilentArgs) { $customSilentArgs } else { '/silent /quiet /qn /S' }
-            return [PSCustomObject]@{
+            [PSCustomObject]@{
                 InstallerType        = 'exe'
                 SilentArgs           = $silent
                 InstallCommandLine   = 'powershell.exe -ExecutionPolicy Bypass -File .\Install.ps1'
@@ -156,4 +159,22 @@ function Get-PackageAdapter {
             }
         }
     }
+
+    if ($ShowCard) {
+        $codesText = ($adapter.SuccessCodes -join ', ')
+        $sysBadge = if ($adapter.SupportedUnderSystem) { '[SYSTEM READY]' } else { '[USER CONTEXT]' }
+        Write-Host ""
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  | WINGET INTUNE ADAPTER SPECIFICATION                 {0,16} |" -f $sysBadge) -ForegroundColor Cyan
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  | Installer Type : {0,-51} |" -f $adapter.InstallerType.ToUpperInvariant()) -ForegroundColor White
+        Write-Host ("  | Detection Mode : {0,-51} |" -f $adapter.DetectionStrategy) -ForegroundColor Green
+        Write-Host ("  | Silent Args    : {0,-51} |" -f $(if ($adapter.SilentArgs) { $adapter.SilentArgs } else { '<none>' })) -ForegroundColor Yellow
+        Write-Host ("  | Success Codes  : {0,-51} |" -f $codesText) -ForegroundColor Gray
+        Write-Host ("  | Notes          : {0,-51} |" -f $adapter.Notes) -ForegroundColor DarkGray
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ""
+    }
+
+    return $adapter
 }

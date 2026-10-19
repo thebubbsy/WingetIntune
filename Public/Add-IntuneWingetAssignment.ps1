@@ -23,7 +23,10 @@ function Add-IntuneWingetAssignment {
 
         [Parameter()]
         [ValidateSet('Required', 'Available', 'Uninstall')]
-        [string]$Intent = 'Required'
+        [string]$Intent = 'Required',
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
     $token = Connect-GraphToken -Scopes @('https://graph.microsoft.com/DeviceManagementApps.ReadWrite.All')
@@ -33,16 +36,19 @@ function Add-IntuneWingetAssignment {
     }
 
     $targetPayload = @{}
+    $targetScopeLabel = $GroupId
 
     if ($GroupId -eq 'All Devices') {
         $targetPayload = @{
             '@odata.type' = '#microsoft.graph.allDevicesAssignmentTarget'
         }
+        $targetScopeLabel = 'All Devices (Tenant-Wide)'
     }
     elseif ($GroupId -eq 'All Users' -or $GroupId -eq 'All Licensed Users') {
         $targetPayload = @{
             '@odata.type' = '#microsoft.graph.allLicensedUsersAssignmentTarget'
         }
+        $targetScopeLabel = 'All Licensed Users (Tenant-Wide)'
     }
     else {
         $resolvedGroupId = $GroupId
@@ -51,9 +57,13 @@ function Add-IntuneWingetAssignment {
             $gRes = Invoke-ResilientGraphRest -Uri $groupSearchUri -Method GET -Headers $authHeader
             if ($gRes.value -and $gRes.value.Count -gt 0) {
                 $resolvedGroupId = $gRes.value[0].id
+                $targetScopeLabel = "$GroupId ($resolvedGroupId)"
             } else {
                 throw "Could not find Entra ID group matching name: $GroupId"
             }
+        }
+        else {
+            $targetScopeLabel = "Entra Group ($resolvedGroupId)"
         }
 
         $targetPayload = @{
@@ -69,9 +79,30 @@ function Add-IntuneWingetAssignment {
     }
 
     $assignUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps/$AppId/assignments"
-    Write-Host "  [+] Assigning App [$AppId] to target [$GroupId] (Intent: $Intent)..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [+] Assigning App [$AppId] to target [$GroupId] (Intent: $Intent)..." -ForegroundColor Cyan
+    }
 
     $res = Invoke-ResilientGraphRest -Uri $assignUri -Method POST -Headers $authHeader -Body $assignPayload
-    Write-Host "  [OK] Assignment successfully configured!" -ForegroundColor Green
+    if (-not $Quiet) {
+        $intentUpper = $Intent.ToUpperInvariant()
+        $intentColor = switch ($intentUpper) {
+            'REQUIRED'  { 'Green' }
+            'AVAILABLE' { 'Yellow' }
+            'UNINSTALL' { 'Red' }
+            Default     { 'Cyan' }
+        }
+        $assignmentIdDisplay = if ($res -and $res.id) { $res.id } else { 'Created' }
+        Write-Host ""
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  | INTUNE WIN32 APP ASSIGNMENT RECEIPT                 [{0,-12}] |" -f $intentUpper) -ForegroundColor $intentColor
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  | Mobile App ID : {0,-52} |" -f $AppId) -ForegroundColor White
+        Write-Host ("  | Target Scope  : {0,-52} |" -f $targetScopeLabel) -ForegroundColor Cyan
+        Write-Host ("  | Graph Target  : {0,-52} |" -f $targetPayload['@odata.type']) -ForegroundColor Gray
+        Write-Host ("  | Assignment ID : {0,-52} |" -f $assignmentIdDisplay) -ForegroundColor DarkGray
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ""
+    }
     return $res
 }
