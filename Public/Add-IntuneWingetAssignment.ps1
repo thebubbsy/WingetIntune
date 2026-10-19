@@ -26,6 +26,9 @@ function Add-IntuneWingetAssignment {
         [string]$Intent = 'Required',
 
         [Parameter()]
+        [switch]$CopyReceipt,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -84,6 +87,21 @@ function Add-IntuneWingetAssignment {
     }
 
     $res = Invoke-ResilientGraphRest -Uri $assignUri -Method POST -Headers $authHeader -Body $assignPayload
+    $assignmentIdDisplay = if ($res -and $res.id) { $res.id } else { 'Created' }
+
+    if ($CopyReceipt) {
+        $mdLines = @(
+            "### Intune Win32 App Assignment Receipt (``$Intent``)",
+            "| Field | Value |",
+            "| :--- | :--- |",
+            "| **Mobile App ID** | ``$AppId`` |",
+            "| **Target Scope** | $targetScopeLabel |",
+            "| **Graph Target Type** | ``$($targetPayload['@odata.type'])`` |",
+            "| **Assignment ID** | ``$assignmentIdDisplay`` |"
+        )
+        try { Set-Clipboard -Value ($mdLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
+    }
+
     if (-not $Quiet) {
         $intentUpper = $Intent.ToUpperInvariant()
         $intentColor = switch ($intentUpper) {
@@ -92,7 +110,6 @@ function Add-IntuneWingetAssignment {
             'UNINSTALL' { 'Red' }
             Default     { 'Cyan' }
         }
-        $assignmentIdDisplay = if ($res -and $res.id) { $res.id } else { 'Created' }
         Write-Host ""
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ("  | INTUNE WIN32 APP ASSIGNMENT RECEIPT                 [{0,-12}] |" -f $intentUpper) -ForegroundColor $intentColor
@@ -101,6 +118,9 @@ function Add-IntuneWingetAssignment {
         Write-Host ("  | Target Scope  : {0,-52} |" -f $targetScopeLabel) -ForegroundColor Cyan
         Write-Host ("  | Graph Target  : {0,-52} |" -f $targetPayload['@odata.type']) -ForegroundColor Gray
         Write-Host ("  | Assignment ID : {0,-52} |" -f $assignmentIdDisplay) -ForegroundColor DarkGray
+        if ($CopyReceipt) {
+            Write-Host "  | [CLIPBOARD] Markdown assignment receipt table copied to clipboard.   |" -ForegroundColor Green
+        }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ""
     }

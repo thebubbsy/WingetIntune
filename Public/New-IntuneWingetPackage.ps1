@@ -51,14 +51,21 @@ function New-IntuneWingetPackage {
         [string]$Intent = 'Required',
 
         [Parameter()]
-        [switch]$CopyPublishCommand
+        [switch]$CopyPublishCommand,
+
+        [Parameter()]
+        [switch]$CopyReceipt,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
-    Write-Host "`n  [WingetIntune] Enterprise Win32 App Packager" -ForegroundColor Cyan
-    Write-Host "  --------------------------------------------" -ForegroundColor DarkGray
-
+    if (-not $Quiet) {
+        Write-Host "`n  [WingetIntune] Enterprise Win32 App Packager" -ForegroundColor Cyan
+        Write-Host "  --------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  [1/5] [#----] Resolving Winget manifest & installer adapter for '$PackageId'..." -ForegroundColor Cyan
+    }
     # 1. Fetch Manifest and Resolve Adapter
-    Write-Host "  [1/5] [#----] Resolving Winget manifest & installer adapter for '$PackageId'..." -ForegroundColor Cyan
     $manifest = Get-WingetManifest -PackageId $PackageId
     $adapter = Get-PackageAdapter -InstallerType $manifest.InstallerType -Manifest $manifest
 
@@ -77,14 +84,18 @@ function New-IntuneWingetPackage {
 
     # 2. Generate Install.ps1
     $adapterType = $adapter.InstallerType
-    Write-Host "  [2/5] [##---] Generating self-healing SYSTEM install shim for $adapterType adapter..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [2/5] [##---] Generating self-healing SYSTEM install shim for $adapterType adapter..." -ForegroundColor Cyan
+    }
     $effectiveArgs = if ($CustomArgs) { $adapter.SilentArgs + " " + $CustomArgs } else { $adapter.SilentArgs }
     $installCode = New-StandaloneInstallShim -PackageId $PackageId -CustomArgs $effectiveArgs -Scope $Scope -SuccessCodes $adapter.SuccessCodes
     $installPath = Join-Path $srcFolder 'Install.ps1'
     $installCode | Out-File -FilePath $installPath -Force -Encoding utf8
 
     # 3. Generate Uninstall.ps1
-    Write-Host "  [3/5] [###--] Generating uninstall script..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [3/5] [###--] Generating uninstall script..." -ForegroundColor Cyan
+    }
     $uninstallLines = @(
         "# Standalone Uninstall Script for $PackageId",
         "`$wingetCmd = Get-Command 'winget.exe' -ErrorAction SilentlyContinue",
@@ -96,14 +107,18 @@ function New-IntuneWingetPackage {
     $uninstallLines | Out-File -FilePath $uninstallPath -Force -Encoding utf8
 
     # 4. Generate Detect.ps1
-    Write-Host "  [4/5] [####-] Generating detection script ($($adapter.DetectionStrategy))..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [4/5] [####-] Generating detection script ($($adapter.DetectionStrategy))..." -ForegroundColor Cyan
+    }
     $detectCode = New-StandaloneDetectShim -PackageId $PackageId -DisplayName $DisplayName -ProductCode $adapter.ProductCode -MinVersion $manifest.Version -DetectionStrategy $adapter.DetectionStrategy
     $detectPath = Join-Path $OutputFolder 'Detect.ps1'
     $detectCode | Out-File -FilePath $detectPath -Force -Encoding utf8
 
     # 5. Fetch IntuneWinAppUtil and Compile .intunewin
     $utilPath = Get-IntuneWinAppUtil
-    Write-Host "  [5/5] [#####] Compiling $PackageId.intunewin package..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [5/5] [#####] Compiling $PackageId.intunewin package..." -ForegroundColor Cyan
+    }
     
     $proc = Start-Process -FilePath $utilPath -ArgumentList "-c `"$srcFolder`" -s `"Install.ps1`" -o `"$OutputFolder`" -q" -Wait -PassThru -NoNewWindow
     
@@ -147,17 +162,37 @@ function New-IntuneWingetPackage {
         try { Set-Clipboard -Value $publishCmd -ErrorAction SilentlyContinue } catch { }
     }
 
-    Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
-    Write-Host "  | WINGETINTUNE .INTUNEWIN BUILD RECEIPT                                |" -ForegroundColor Cyan
-    Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
-    Write-Host ("  | Package     : {0,-54} |" -f "$DisplayName ($PackageId)") -ForegroundColor Gray
-    Write-Host ("  | Adapter     : {0,-22} Detect : {1,-22} |" -f $adapter.InstallerType, $adapter.DetectionStrategy) -ForegroundColor Gray
-    Write-Host ("  | Payload     : {0,-22} SHA256 : {1,-22} |" -f "$packageSizeMb MB (.intunewin)", $sha256Short) -ForegroundColor Green
-    Write-Host ("  | Output Path : {0,-54} |" -f $renamedIntuneWin) -ForegroundColor Gray
-    if ($CopyPublishCommand) {
-        Write-Host "  | [CLIPBOARD] Publish-IntuneWingetApp command copied to clipboard.     |" -ForegroundColor Green
+    if ($CopyReceipt) {
+        $mdLines = @(
+            "### WingetIntune ``.intunewin`` Build Receipt",
+            "| Property | Value |",
+            "| :--- | :--- |",
+            "| **Package** | $DisplayName (``$PackageId``) |",
+            "| **Installer Adapter** | ``$($adapter.InstallerType)`` |",
+            "| **Detection Strategy** | ``$($adapter.DetectionStrategy)`` |",
+            "| **Payload Size** | $packageSizeMb MB |",
+            "| **SHA-256 Prefix** | ``$sha256Short`` |",
+            "| **Output Package** | ``$renamedIntuneWin`` |"
+        )
+        try { Set-Clipboard -Value ($mdLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
     }
-    Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+
+    if (-not $Quiet) {
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host "  | WINGETINTUNE .INTUNEWIN BUILD RECEIPT                                |" -ForegroundColor Cyan
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  | Package     : {0,-54} |" -f "$DisplayName ($PackageId)") -ForegroundColor Gray
+        Write-Host ("  | Adapter     : {0,-22} Detect : {1,-22} |" -f $adapter.InstallerType, $adapter.DetectionStrategy) -ForegroundColor Gray
+        Write-Host ("  | Payload     : {0,-22} SHA256 : {1,-22} |" -f "$packageSizeMb MB (.intunewin)", $sha256Short) -ForegroundColor Green
+        Write-Host ("  | Output Path : {0,-54} |" -f $renamedIntuneWin) -ForegroundColor Gray
+        if ($CopyPublishCommand) {
+            Write-Host "  | [CLIPBOARD] Publish-IntuneWingetApp command copied to clipboard.     |" -ForegroundColor Green
+        }
+        if ($CopyReceipt) {
+            Write-Host "  | [CLIPBOARD] Markdown .intunewin build receipt copied to clipboard.   |" -ForegroundColor Green
+        }
+        Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
+    }
 
     # 7. Publish if requested
     if ($Publish) {
