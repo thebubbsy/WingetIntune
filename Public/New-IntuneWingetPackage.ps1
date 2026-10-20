@@ -57,6 +57,12 @@ function New-IntuneWingetPackage {
         [switch]$CopyReceipt,
 
         [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$CopyTsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -176,6 +182,16 @@ function New-IntuneWingetPackage {
         )
         try { Set-Clipboard -Value ($mdLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
     }
+    if ($CopyJson) {
+        try { Set-Clipboard -Value ($metadata | ConvertTo-Json -Depth 5) -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($CopyTsv) {
+        $tsvLines = @(
+            "PackageId`tDisplayName`tInstallerType`tDetectionStrategy`tPackageSizeMb`tSha256Prefix`tIntuneWinPath",
+            "$PackageId`t$DisplayName`t$($adapter.InstallerType)`t$($adapter.DetectionStrategy)`t$packageSizeMb`t$sha256Short`t$renamedIntuneWin"
+        )
+        try { Set-Clipboard -Value ($tsvLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
+    }
 
     if (-not $Quiet) {
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -190,6 +206,12 @@ function New-IntuneWingetPackage {
         }
         if ($CopyReceipt) {
             Write-Host "  | [CLIPBOARD] Markdown .intunewin build receipt copied to clipboard.   |" -ForegroundColor Green
+        }
+        if ($CopyJson) {
+            Write-Host "  | [CLIPBOARD] JSON .intunewin build metadata copied to clipboard.      |" -ForegroundColor Green
+        }
+        if ($CopyTsv) {
+            Write-Host "  | [CLIPBOARD] TSV .intunewin build summary copied to clipboard.        |" -ForegroundColor Green
         }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
     }

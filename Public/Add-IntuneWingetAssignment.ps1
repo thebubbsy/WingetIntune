@@ -29,6 +29,12 @@ function Add-IntuneWingetAssignment {
         [switch]$CopyReceipt,
 
         [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$CopyTsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -101,6 +107,23 @@ function Add-IntuneWingetAssignment {
         )
         try { Set-Clipboard -Value ($mdLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
     }
+    if ($CopyJson) {
+        $jsonObj = [PSCustomObject]@{
+            MobileAppId     = $AppId
+            Intent          = $Intent
+            TargetScope     = $targetScopeLabel
+            GraphTargetType = $targetPayload['@odata.type']
+            AssignmentId    = $assignmentIdDisplay
+        } | ConvertTo-Json -Depth 4
+        try { Set-Clipboard -Value $jsonObj -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($CopyTsv) {
+        $tsvLines = @(
+            "MobileAppId`tIntent`tTargetScope`tGraphTargetType`tAssignmentId",
+            "$AppId`t$Intent`t$targetScopeLabel`t$($targetPayload['@odata.type'])`t$assignmentIdDisplay"
+        )
+        try { Set-Clipboard -Value ($tsvLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
+    }
 
     if (-not $Quiet) {
         $intentUpper = $Intent.ToUpperInvariant()
@@ -120,6 +143,12 @@ function Add-IntuneWingetAssignment {
         Write-Host ("  | Assignment ID : {0,-52} |" -f $assignmentIdDisplay) -ForegroundColor DarkGray
         if ($CopyReceipt) {
             Write-Host "  | [CLIPBOARD] Markdown assignment receipt table copied to clipboard.   |" -ForegroundColor Green
+        }
+        if ($CopyJson) {
+            Write-Host "  | [CLIPBOARD] JSON assignment receipt copied to clipboard.             |" -ForegroundColor Green
+        }
+        if ($CopyTsv) {
+            Write-Host "  | [CLIPBOARD] TSV assignment receipt copied to clipboard.              |" -ForegroundColor Green
         }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ""
