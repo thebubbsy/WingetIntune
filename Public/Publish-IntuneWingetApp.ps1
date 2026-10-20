@@ -34,6 +34,9 @@ function Publish-IntuneWingetApp {
         [switch]$CopyReceipt,
 
         [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -330,6 +333,28 @@ function Publish-IntuneWingetApp {
                 Set-Clipboard -Value $mdReceipt -ErrorAction Stop
                 if (-not $Quiet) {
                     Write-Host "  [CLIPBOARD] Copied Markdown Cloud Publication Receipt to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
+
+        if ($CopyJson) {
+            try {
+                $jsonReceipt = [PSCustomObject]@{
+                    AppName          = $appName
+                    PackageId        = $PackageId
+                    AppId            = $appId
+                    ContentVersionId = $versionId
+                    FileId           = $fileId
+                    FileName         = $fileName
+                    PayloadSizeMB    = $pkgSizeMb
+                    Sha256Digest     = $fileHash
+                    AssignedGroups   = @($AssignTo)
+                    Intent           = $Intent
+                    PublishedAtUtc   = [DateTime]::UtcNow.ToString('o')
+                } | ConvertTo-Json -Depth 4
+                Set-Clipboard -Value $jsonReceipt -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt JSON to clipboard." -ForegroundColor Green
                 }
             } catch { }
         }

@@ -31,6 +31,12 @@ function Clear-OrphanedIntuneUploads {
         [switch]$PassThru,
 
         [Parameter()]
+        [switch]$CopyReceipt,
+
+        [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -165,9 +171,10 @@ function Clear-OrphanedIntuneUploads {
         }
     }
 
+    $localPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'LocalSessionFile' }).Count
+    $graphPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'GraphContentFile' }).Count
+
     if (-not $Quiet) {
-        $localPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'LocalSessionFile' }).Count
-        $graphPurgedCount = @($purgedItems | Where-Object { $_.Type -eq 'GraphContentFile' }).Count
         Write-Host ""
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  |  [WingetIntune] Orphaned Session & Upload Cleanup Summary        |" -ForegroundColor Cyan
@@ -179,6 +186,46 @@ function Clear-OrphanedIntuneUploads {
         Write-Host ("  |  Completed At (UTC)   : {0,-41}|" -f $nowUtc.ToString('yyyy-MM-dd HH:mm:ss')) -ForegroundColor Gray
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  [OK] Orphan cleanup completed. $($purgedItems.Count) item(s) purged." -ForegroundColor Green
+    }
+
+    if ($CopyReceipt) {
+        try {
+            $mdReceipt = @(
+                "### WingetIntune Orphaned Upload & Session Cleanup Receipt",
+                "| Metric | Value |",
+                "| :--- | :--- |",
+                "| **Max Age Floor** | $MaxAgeHours hour(s) |",
+                "| **Local Sessions Purged** | $localPurgedCount |",
+                "| **Graph Content Purged** | $graphPurgedCount |",
+                "| **Total Items Purged** | $($purgedItems.Count) |",
+                "| **Completed At (UTC)** | $($nowUtc.ToString('yyyy-MM-dd HH:mm:ss')) |"
+            ) -join "`r`n"
+            Set-Clipboard -Value $mdReceipt -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Markdown Orphan Cleanup Receipt to clipboard." -ForegroundColor Green
+            }
+        } catch {
+            Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
+        }
+    }
+
+    if ($CopyJson) {
+        try {
+            $jsonSummary = [PSCustomObject]@{
+                MaxAgeHours         = $MaxAgeHours
+                LocalSessionsPurged = $localPurgedCount
+                GraphContentPurged  = $graphPurgedCount
+                TotalItemsPurged    = $purgedItems.Count
+                CompletedAtUtc      = $nowUtc.ToString('o')
+                PurgedItems         = @($purgedItems)
+            } | ConvertTo-Json -Depth 5
+            Set-Clipboard -Value $jsonSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Orphan Cleanup Summary JSON to clipboard." -ForegroundColor Green
+            }
+        } catch {
+            Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
+        }
     }
 
     if ($PassThru) {
