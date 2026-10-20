@@ -24,11 +24,22 @@ function Sync-IntuneWingetCatalog {
         [string]$Filter = '',
 
         [Parameter()]
-        [switch]$CopySummary
+        [switch]$CopySummary,
+
+        [Parameter()]
+        [switch]$CopyMarkdown,
+
+        [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$Quiet
     )
 
-    Write-Host "`n  📊 WingetIntune — Tenant Catalog Lifecycle & Audit Engine" -ForegroundColor Cyan
-    Write-Host "  ────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    if (-not $Quiet) {
+        Write-Host "`n  📊 WingetIntune — Tenant Catalog Lifecycle & Audit Engine" -ForegroundColor Cyan
+        Write-Host "  ────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    }
 
     $token = Connect-GraphToken -Scopes @('https://graph.microsoft.com/DeviceManagementApps.ReadWrite.All')
     $authHeader = @{
@@ -37,7 +48,9 @@ function Sync-IntuneWingetCatalog {
     }
 
     # Query all Win32 apps from Intune
-    Write-Host "  [🔍] Querying Intune tenant for deployed Win32 applications..." -ForegroundColor Cyan
+    if (-not $Quiet) {
+        Write-Host "  [🔍] Querying Intune tenant for deployed Win32 applications..." -ForegroundColor Cyan
+    }
     $listUri = "https://graph.microsoft.com/beta/deviceAppManagement/mobileApps?`$filter=isof('microsoft.graph.win32LobApp')"
     $appsRes = Invoke-ResilientGraphRest -Uri $listUri -Method GET -Headers $authHeader
 
@@ -61,9 +74,13 @@ function Sync-IntuneWingetCatalog {
     }
 
     $uniquePublishers = @($appAudit | Select-Object -ExpandProperty Publisher -Unique | Where-Object { $_ }).Count
-    Write-Host "  [✔] Discovered $($appAudit.Count) Win32 App(s) across $uniquePublishers publisher(s) in Microsoft Intune." -ForegroundColor Green
+    if (-not $Quiet) {
+        Write-Host "  [✔] Discovered $($appAudit.Count) Win32 App(s) across $uniquePublishers publisher(s) in Microsoft Intune." -ForegroundColor Green
+    }
 
-    if ($appAudit.Count -gt 0) {
+    if ($appAudit.Count -gt 0 -and -not $Quiet) {
+        $filterBadge = if ($Filter) { "Filter: '$Filter'" } else { "Filter: <all>" }
+        $footerSummary = ("Total Apps: $($appAudit.Count) | Publishers: $uniquePublishers | $filterBadge").PadRight(76).Substring(0, 76)
         Write-Host ""
         Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  |  INTUNE WIN32 CATALOG AUDIT TABLE HUD                                          |" -ForegroundColor Cyan
@@ -84,13 +101,46 @@ function Sync-IntuneWingetCatalog {
             Write-Host ("  |  " + $moreMsg + "  |") -ForegroundColor DarkGray
         }
         Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
+        Write-Host ("  |  " + $footerSummary + "  |") -ForegroundColor Cyan
+        Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
     }
 
     if ($CopySummary -and $appAudit.Count -gt 0) {
         try {
             $tsv = "AppId`tDisplayName`tPublisher`tStatus`n" + (($appAudit | ForEach-Object { "$($_.AppId)`t$($_.DisplayName)`t$($_.Publisher)`t$($_.Status)" }) -join "`n")
             Set-Clipboard -Value $tsv -ErrorAction Stop
-            Write-Host "  [CLIPBOARD] Catalog audit summary ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit summary ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyMarkdown -and $appAudit.Count -gt 0) {
+        try {
+            $mdLines = [System.Collections.Generic.List[string]]::new()
+            $mdLines.Add("### Intune Win32 Catalog Audit Summary ($($appAudit.Count) Apps, $uniquePublishers Publishers)")
+            $mdLines.Add("")
+            $mdLines.Add("| # | App Name | Publisher | App ID | Status |")
+            $mdLines.Add("| :- | :--- | :--- | :--- | :--- |")
+            $rowNum = 0
+            foreach ($entry in $appAudit) {
+                $rowNum++
+                $mdLines.Add("| $rowNum | $($entry.DisplayName) | $($entry.Publisher) | ``$($entry.AppId)`` | ``$($entry.Status)`` |")
+            }
+            Set-Clipboard -Value ($mdLines -join "`r`n") -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit Markdown table ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyJson -and $appAudit.Count -gt 0) {
+        try {
+            $jsonCatalog = $appAudit | ConvertTo-Json -Depth 5
+            Set-Clipboard -Value $jsonCatalog -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit JSON ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
         } catch { }
     }
 

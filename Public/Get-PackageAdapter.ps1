@@ -15,7 +15,10 @@ function Get-PackageAdapter {
         [object]$Manifest,
 
         [Parameter()]
-        [switch]$ShowCard
+        [switch]$ShowCard,
+
+        [Parameter()]
+        [switch]$CopyReceipt
     )
 
     $normalized = $InstallerType.Trim().ToLowerInvariant()
@@ -174,6 +177,29 @@ function Get-PackageAdapter {
         Write-Host ("  | Notes          : {0,-51} |" -f $adapter.Notes) -ForegroundColor DarkGray
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ""
+    }
+
+    if ($CopyReceipt) {
+        try {
+            $codesStr = ($adapter.SuccessCodes -join ', ')
+            $silentStr = if ($adapter.SilentArgs) { $adapter.SilentArgs } else { '<none>' }
+            $mdAdapter = @(
+                "### WingetIntune Installer Adapter Specification"
+                ""
+                "| Field | Value |"
+                "| :--- | :--- |"
+                "| **Installer Type** | ``$($adapter.InstallerType.ToUpperInvariant())`` |"
+                "| **Detection Strategy** | ``$($adapter.DetectionStrategy)`` |"
+                "| **Silent Arguments** | ``$silentStr`` |"
+                "| **Install Command** | ``$($adapter.InstallCommandLine)`` |"
+                "| **Uninstall Command** | ``$($adapter.UninstallCommandLine)`` |"
+                "| **Success Codes** | ``$codesStr`` |"
+                "| **SYSTEM Supported** | ``$($adapter.SupportedUnderSystem)`` |"
+                "| **Notes** | $($adapter.Notes) |"
+            ) -join "`r`n"
+            Set-Clipboard -Value $mdAdapter -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (Markdown) copied to clipboard." -ForegroundColor Green
+        } catch { }
     }
 
     return $adapter
