@@ -29,6 +29,12 @@ function New-IntuneRemediation {
         [switch]$CopySummary,
 
         [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$CopyTsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -125,10 +131,45 @@ function New-IntuneRemediation {
         try {
             Set-Clipboard -Value $mdSummary -ErrorAction Stop
             if (-not $Quiet) {
-                Write-Host "  [CLIPBOARD] Copied Proactive Remediation deployment summary to clipboard." -ForegroundColor Cyan
+                Write-Host "  [CLIPBOARD] Copied Proactive Remediation deployment summary (Markdown) to clipboard." -ForegroundColor Cyan
             }
         } catch {
             Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
+        }
+    }
+
+    if ($CopyJson) {
+        $jsonSummary = [ordered]@{
+            PackageId           = $PackageId
+            MinVersion          = if ($MinVersion) { $MinVersion } else { 'Any Installed' }
+            DetectScriptPath    = $detectFile
+            DetectBytes         = $detectBytes
+            DetectSha256        = $detectHash
+            RemediateScriptPath = $remediateFile
+            RemediateBytes      = $remediateBytes
+            RemediateSha256     = $remediateHash
+            RunContext          = 'SYSTEM (64-bit PowerShell Host)'
+        } | ConvertTo-Json -Depth 4
+        try {
+            Set-Clipboard -Value $jsonSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Proactive Remediation build receipt (JSON) to clipboard." -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Verbose "Clipboard JSON copy failed: $($_.Exception.Message)"
+        }
+    }
+
+    if ($CopyTsv) {
+        $tsvFloor = if ($MinVersion) { $MinVersion } else { 'Any Installed' }
+        $tsvSummary = "PackageId`tMinVersion`tDetectScriptPath`tDetectBytes`tDetectSha256`tRemediateScriptPath`tRemediateBytes`tRemediateSha256`r`n$PackageId`t$tsvFloor`t$detectFile`t$detectBytes`t$detectHash`t$remediateFile`t$remediateBytes`t$remediateHash"
+        try {
+            Set-Clipboard -Value $tsvSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Proactive Remediation build receipt (TSV) to clipboard." -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Verbose "Clipboard TSV copy failed: $($_.Exception.Message)"
         }
     }
 

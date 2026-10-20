@@ -48,6 +48,15 @@ function Send-AzureBlockBlob {
         [switch]$Resume,
 
         [Parameter()]
+        [switch]$CopyReceipt,
+
+        [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$CopyTsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -324,12 +333,55 @@ function Send-AzureBlockBlob {
     $session.LastUpdatedUtc = (Get-Date).ToUniversalTime().ToString('o')
     $session | ConvertTo-Json -Depth 10 | Out-File -FilePath $sessionFile -Force -Encoding utf8
 
+    $elapsedSec = [Math]::Max(0.1, $uploadSw.Elapsed.TotalSeconds)
+    $mbps = [Math]::Round(($bytesTransferredThisRun / 1MB) / $elapsedSec, 2)
+    $totalMb = [Math]::Round($fileLength / 1MB, 2)
+    $newBlocks = $totalBlocks - $alreadyUploaded
+    $shortHash = if ($fileHash.Length -ge 16) { $fileHash.Substring(0, 16) + '...' } else { $fileHash }
+
+    if ($CopyReceipt) {
+        try {
+            $mdBlob = @(
+                "### Azure Storage Block Blob Commit Receipt"
+                ""
+                "| Field | Value |"
+                "| :--- | :--- |"
+                "| **File Name** | ``$($fileItem.Name)`` |"
+                "| **Payload Size** | $totalMb MB ($fileLength bytes) |"
+                "| **Block Summary** | $totalBlocks total ($newBlocks uploaded, $alreadyUploaded resumed) |"
+                "| **Throughput** | $mbps MB/s ($([Math]::Round($elapsedSec, 1))s transfer) |"
+                "| **SHA-256** | ``$fileHash`` |"
+            ) -join "`r`n"
+            Set-Clipboard -Value $mdBlob -ErrorAction Stop
+        } catch { }
+    }
+
+    if ($CopyJson) {
+        try {
+            $jsonBlob = [ordered]@{
+                FileName      = $fileItem.Name
+                FileLength    = $fileLength
+                PayloadMb     = $totalMb
+                TotalBlocks   = $totalBlocks
+                UploadedBlocks= $newBlocks
+                ResumedBlocks = $alreadyUploaded
+                ThroughputMbps= $mbps
+                ElapsedSec    = [Math]::Round($elapsedSec, 1)
+                Sha256        = $fileHash
+                State         = 'Committed'
+            } | ConvertTo-Json -Depth 4
+            Set-Clipboard -Value $jsonBlob -ErrorAction Stop
+        } catch { }
+    }
+
+    if ($CopyTsv) {
+        try {
+            $tsvBlob = "FileName`tFileLength`tPayloadMb`tTotalBlocks`tUploadedBlocks`tResumedBlocks`tThroughputMbps`tElapsedSec`tSha256`r`n$($fileItem.Name)`t$fileLength`t$totalMb`t$totalBlocks`t$newBlocks`t$alreadyUploaded`t$mbps`t$([Math]::Round($elapsedSec, 1))`t$fileHash"
+            Set-Clipboard -Value $tsvBlob -ErrorAction Stop
+        } catch { }
+    }
+
     if (-not $Quiet) {
-        $elapsedSec = [Math]::Max(0.1, $uploadSw.Elapsed.TotalSeconds)
-        $mbps = [Math]::Round(($bytesTransferredThisRun / 1MB) / $elapsedSec, 2)
-        $totalMb = [Math]::Round($fileLength / 1MB, 2)
-        $newBlocks = $totalBlocks - $alreadyUploaded
-        $shortHash = if ($fileHash.Length -ge 16) { $fileHash.Substring(0, 16) + '...' } else { $fileHash }
         Write-Host "  [##########] 100% | Azure Block Blob Commit Confirmed ($totalBlocks/$totalBlocks blocks, $mbps MB/s)" -ForegroundColor Green
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
         Write-Host "  | AZURE STORAGE BLOCK BLOB COMMIT RECEIPT                 [COMMITTED]  |" -ForegroundColor Green
@@ -339,6 +391,15 @@ function Send-AzureBlockBlob {
         Write-Host ("  | Block Summary : {0,-52} |" -f "$totalBlocks total ($newBlocks uploaded, $alreadyUploaded resumed)") -ForegroundColor Cyan
         Write-Host ("  | Throughput    : {0,-52} |" -f "$mbps MB/s ($([Math]::Round($elapsedSec, 1))s transfer)") -ForegroundColor Gray
         Write-Host ("  | SHA-256       : {0,-52} |" -f $shortHash) -ForegroundColor Gray
+        if ($CopyReceipt) {
+            Write-Host "  | [CLIPBOARD] Commit receipt (Markdown) copied to clipboard.           |" -ForegroundColor Green
+        }
+        if ($CopyJson) {
+            Write-Host "  | [CLIPBOARD] Commit receipt (JSON) copied to clipboard.               |" -ForegroundColor Green
+        }
+        if ($CopyTsv) {
+            Write-Host "  | [CLIPBOARD] Commit receipt (TSV) copied to clipboard.                |" -ForegroundColor Green
+        }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
     }
     return $true
