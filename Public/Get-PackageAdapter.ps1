@@ -18,7 +18,13 @@ function Get-PackageAdapter {
         [switch]$ShowCard,
 
         [Parameter()]
-        [switch]$CopyReceipt
+        [switch]$CopyReceipt,
+
+        [Parameter()]
+        [switch]$CopyJson,
+
+        [Parameter()]
+        [switch]$CopyTsv
     )
 
     $normalized = $InstallerType.Trim().ToLowerInvariant()
@@ -199,6 +205,24 @@ function Get-PackageAdapter {
             ) -join "`r`n"
             Set-Clipboard -Value $mdAdapter -ErrorAction Stop
             Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (Markdown) copied to clipboard." -ForegroundColor Green
+        } catch { }
+    }
+
+    if ($CopyJson) {
+        try {
+            $jsonAdapter = $adapter | ConvertTo-Json -Depth 4
+            Set-Clipboard -Value $jsonAdapter -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (JSON) copied to clipboard." -ForegroundColor Green
+        } catch { }
+    }
+
+    if ($CopyTsv) {
+        try {
+            $codesStr = ($adapter.SuccessCodes -join ', ')
+            $tsvHeader = "InstallerType`tDetectionStrategy`tSilentArgs`tInstallCommandLine`tUninstallCommandLine`tSuccessCodes`tSupportedUnderSystem`tNotes"
+            $tsvRow = "$($adapter.InstallerType)`t$($adapter.DetectionStrategy)`t$($adapter.SilentArgs)`t$($adapter.InstallCommandLine)`t$($adapter.UninstallCommandLine)`t$codesStr`t$($adapter.SupportedUnderSystem)`t$($adapter.Notes)"
+            Set-Clipboard -Value ("$tsvHeader`r`n$tsvRow") -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (TSV) copied to clipboard." -ForegroundColor Green
         } catch { }
     }
 

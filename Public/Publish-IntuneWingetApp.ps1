@@ -37,6 +37,9 @@ function Publish-IntuneWingetApp {
         [switch]$CopyJson,
 
         [Parameter()]
+        [switch]$CopyTsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -355,6 +358,17 @@ function Publish-IntuneWingetApp {
                 Set-Clipboard -Value $jsonReceipt -ErrorAction Stop
                 if (-not $Quiet) {
                     Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt JSON to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
+
+        if ($CopyTsv) {
+            try {
+                $tsvHeader = "AppName`tPackageId`tAppId`tContentVersionId`tFileName`tPayloadSizeMB`tSha256Digest`tAssignedGroupCount`tIntent`tPublishedAtUtc"
+                $tsvRow = "$appName`t$PackageId`t$appId`t$versionId`t$fileName`t$pkgSizeMb`t$fileHash`t$($AssignTo.Count)`t$Intent`t$([DateTime]::UtcNow.ToString('o'))"
+                Set-Clipboard -Value ("$tsvHeader`r`n$tsvRow") -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt TSV to clipboard." -ForegroundColor Green
                 }
             } catch { }
         }
