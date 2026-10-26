@@ -518,5 +518,15 @@ Describe 'WingetIntune Production Hardening Tests' {
             $pubCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
             $pubCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
         }
+
+        It 'Ensures Add-IntuneWingetAssignment and New-IntuneRemediation support -CopyHtml and -CopyCsv' {
+            $assignCmd = Get-Command Add-IntuneWingetAssignment
+            $assignCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $assignCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+
+            $remCmd = Get-Command New-IntuneRemediation
+            $remCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $remCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+        }
     }
 }

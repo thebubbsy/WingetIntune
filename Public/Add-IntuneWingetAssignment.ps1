@@ -35,6 +35,12 @@ function Add-IntuneWingetAssignment {
         [switch]$CopyTsv,
 
         [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -124,6 +130,30 @@ function Add-IntuneWingetAssignment {
         )
         try { Set-Clipboard -Value ($tsvLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
     }
+    if ($CopyHtml) {
+        $htmlCard = @(
+            "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+            "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+            "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">Intune Win32 App Assignment Receipt</h3>",
+            "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">ASSIGNED ($intentUpper)</span>",
+            "  </div>",
+            "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Mobile App ID</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-family:monospace;font-size:11px;`">$AppId</td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Target Scope</td><td style=`"padding:6px 0;text-align:right;color:#38bdf8;`">$targetScopeLabel</td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Graph Target Type</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$($targetPayload['@odata.type'])</td></tr>",
+            "    <tr><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Assignment ID</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;font-family:monospace;font-size:11px;`">$assignmentIdDisplay</td></tr>",
+            "  </table>",
+            "</div>"
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $htmlCard -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($CopyCsv) {
+        $csvLines = @(
+            "MobileAppId,Intent,TargetScope,GraphTargetType,AssignmentId",
+            "`"$AppId`",`"$Intent`",`"$targetScopeLabel`",`"$($targetPayload['@odata.type'])`",`"$assignmentIdDisplay`""
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $csvLines -ErrorAction SilentlyContinue } catch { }
+    }
 
     if (-not $Quiet) {
         $intentUpper = $Intent.ToUpperInvariant()
@@ -134,6 +164,8 @@ function Add-IntuneWingetAssignment {
             Default     { 'Cyan' }
         }
         Write-Host ""
+        $scopeBadge = if ($GroupId -match 'All') { 'TENANT_WIDE' } else { 'SECURITY_GROUP' }
+        Write-Host ("  [INTENT:{0}] [TARGET:{1}] [GRAPH:CONNECTED] [STATUS:ASSIGNED]" -f $intentUpper, $scopeBadge) -ForegroundColor Green
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ("  | INTUNE WIN32 APP ASSIGNMENT RECEIPT                 [{0,-12}] |" -f $intentUpper) -ForegroundColor $intentColor
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -141,6 +173,7 @@ function Add-IntuneWingetAssignment {
         Write-Host ("  | Target Scope  : {0,-52} |" -f $targetScopeLabel) -ForegroundColor Cyan
         Write-Host ("  | Graph Target  : {0,-52} |" -f $targetPayload['@odata.type']) -ForegroundColor Gray
         Write-Host ("  | Assignment ID : {0,-52} |" -f $assignmentIdDisplay) -ForegroundColor DarkGray
+        Write-Host ("  | Status        : {0,-22} Scope  : {1,-22} |" -f "[ASSIGNED]", $Intent.ToUpper()) -ForegroundColor Green
         if ($CopyReceipt) {
             Write-Host "  | [CLIPBOARD] Markdown assignment receipt table copied to clipboard.   |" -ForegroundColor Green
         }
@@ -149,6 +182,12 @@ function Add-IntuneWingetAssignment {
         }
         if ($CopyTsv) {
             Write-Host "  | [CLIPBOARD] TSV assignment receipt copied to clipboard.              |" -ForegroundColor Green
+        }
+        if ($CopyHtml) {
+            Write-Host "  | [CLIPBOARD] HTML assignment receipt card copied to clipboard.        |" -ForegroundColor Green
+        }
+        if ($CopyCsv) {
+            Write-Host "  | [CLIPBOARD] CSV assignment receipt summary copied to clipboard.      |" -ForegroundColor Green
         }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ""

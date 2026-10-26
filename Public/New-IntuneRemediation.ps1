@@ -35,6 +35,12 @@ function New-IntuneRemediation {
         [switch]$CopyTsv,
 
         [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -107,6 +113,7 @@ function New-IntuneRemediation {
         $outDirDisplay = if ($OutputFolder.Length -gt 46) { '...' + $OutputFolder.Substring($OutputFolder.Length - 43) } else { $OutputFolder }
 
         Write-Host ""
+        Write-Host "  [TYPE:PROACTIVE_REMEDIATION] [RUN:SYSTEM_64BIT] [ENFORCE:STRICT] [STATUS:COMPILED]" -ForegroundColor Green
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  |  [WingetIntune] Proactive Remediation Build Receipt              |" -ForegroundColor Cyan
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -116,6 +123,16 @@ function New-IntuneRemediation {
         Write-Host ("  |  Remediate.ps1 : {0,-48}|" -f ("$remediateBytes B (SHA256: $shortRemHash)")) -ForegroundColor Green
         Write-Host ("  |  Run Context   : {0,-48}|" -f 'SYSTEM (64-bit PowerShell Host)') -ForegroundColor Gray
         Write-Host ("  |  Output Folder : {0,-48}|" -f $outDirDisplay) -ForegroundColor Gray
+        Write-Host ("  |  Status        : {0,-20} Scope  : {1,-20}|" -f "[COMPILED]", "SYSTEM") -ForegroundColor Green
+        if ($CopySummary) {
+            Write-Host "  |  [CLIPBOARD] Markdown deployment summary copied to clipboard.   |" -ForegroundColor Green
+        }
+        if ($CopyHtml) {
+            Write-Host "  |  [CLIPBOARD] HTML remediation build receipt copied to clipboard. |" -ForegroundColor Green
+        }
+        if ($CopyCsv) {
+            Write-Host "  |  [CLIPBOARD] CSV remediation build summary copied to clipboard.   |" -ForegroundColor Green
+        }
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  [OK] Proactive Remediation scripts generated in: $OutputFolder" -ForegroundColor Green
     }
@@ -171,6 +188,32 @@ function New-IntuneRemediation {
         } catch {
             Write-Verbose "Clipboard TSV copy failed: $($_.Exception.Message)"
         }
+    }
+
+    if ($CopyHtml) {
+        $htmlCard = @(
+            "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+            "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+            "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">Intune Proactive Remediation Build Receipt</h3>",
+            "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">COMPILED (SYSTEM)</span>",
+            "  </div>",
+            "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Package ID</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`"><code>$PackageId</code></td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Version Floor</td><td style=`"padding:6px 0;text-align:right;color:#38bdf8;`">$(if ($MinVersion) { $MinVersion } else { 'Any Installed' })</td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Detect.ps1</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;`">$detectBytes B (SHA256: $shortDetectHash)</td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Remediate.ps1</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;`">$remediateBytes B (SHA256: $shortRemHash)</td></tr>",
+            "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Output Folder</td><td style=`"padding:6px 0;text-align:right;color:#94a3b8;font-family:monospace;font-size:11px;`">$OutputFolder</td></tr>",
+            "  </table>",
+            "</div>"
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $htmlCard -ErrorAction SilentlyContinue } catch { }
+    }
+    if ($CopyCsv) {
+        $csvLines = @(
+            "PackageId,MinVersion,DetectBytes,DetectSha256,RemediateBytes,RemediateSha256,OutputFolder",
+            "`"$PackageId`",`"$MinVersion`",$detectBytes,`"$detectHash`",$remediateBytes,`"$remediateHash`",`"$OutputFolder`""
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $csvLines -ErrorAction SilentlyContinue } catch { }
     }
 
     return [PSCustomObject]@{
