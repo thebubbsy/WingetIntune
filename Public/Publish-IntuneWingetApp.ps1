@@ -40,6 +40,12 @@ function Publish-IntuneWingetApp {
         [switch]$CopyTsv,
 
         [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -369,6 +375,42 @@ function Publish-IntuneWingetApp {
                 Set-Clipboard -Value ("$tsvHeader`r`n$tsvRow") -ErrorAction Stop
                 if (-not $Quiet) {
                     Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt TSV to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
+
+        if ($CopyHtml) {
+            try {
+                $htmlCard = @(
+                    "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+                    "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+                    "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">WingetIntune Cloud Publication Receipt</h3>",
+                    "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">PUBLISHED ($Intent)</span>",
+                    "  </div>",
+                    "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+                    "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">App Name</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-weight:600;`">$appName</td></tr>",
+                    "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Intune App ID</td><td style=`"padding:6px 0;text-align:right;color:#38bdf8;font-family:monospace;`">$appId</td></tr>",
+                    "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Content Version</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$versionId ($fileName)</td></tr>",
+                    "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Payload Size</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;`">$pkgSizeMb MB</td></tr>",
+                    "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">SHA-256 Digest</td><td style=`"padding:6px 0;text-align:right;color:#94a3b8;font-family:monospace;font-size:11px;`">$fileHash</td></tr>",
+                    "    <tr><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Assigned Groups</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$($AssignTo.Count) ($Intent)</td></tr>",
+                    "  </table>",
+                    "</div>"
+                ) -join [Environment]::NewLine
+                Set-Clipboard -Value $htmlCard -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied HTML Cloud Publication Receipt card to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
+
+        if ($CopyCsv) {
+            try {
+                $csvHeader = "AppName,PackageId,AppId,ContentVersionId,FileName,PayloadSizeMB,Sha256Digest,AssignedGroupCount,Intent,PublishedAtUtc"
+                $csvRow = "`"$appName`",`"$PackageId`",`"$appId`",`"$versionId`",`"$fileName`",$pkgSizeMb,`"$fileHash`",$($AssignTo.Count),`"$Intent`",`"$([DateTime]::UtcNow.ToString('o'))`""
+                Set-Clipboard -Value ("$csvHeader`r`n$csvRow") -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt CSV to clipboard." -ForegroundColor Green
                 }
             } catch { }
         }

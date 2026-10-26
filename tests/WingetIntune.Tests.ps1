@@ -504,5 +504,19 @@ Describe 'WingetIntune Production Hardening Tests' {
             $cmd.Parameters.ContainsKey('PackageId') | Should -BeTrue
             $cmd.Parameters.ContainsKey('IntuneWinPath') | Should -BeTrue
         }
+
+        It 'Ensures Sync-IntuneWingetCatalog, New-IntuneWingetPackage, and Publish-IntuneWingetApp support -CopyHtml and -CopyCsv' {
+            $syncCmd = Get-Command Sync-IntuneWingetCatalog
+            $syncCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $syncCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+
+            $pkgCmd = Get-Command New-IntuneWingetPackage
+            $pkgCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $pkgCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+
+            $pubCmd = Get-Command Publish-IntuneWingetApp
+            $pubCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $pubCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+        }
     }
 }

@@ -33,6 +33,12 @@ function Sync-IntuneWingetCatalog {
         [switch]$CopyJson,
 
         [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -140,6 +146,46 @@ function Sync-IntuneWingetCatalog {
             Set-Clipboard -Value $jsonCatalog -ErrorAction Stop
             if (-not $Quiet) {
                 Write-Host "  [CLIPBOARD] Catalog audit JSON ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyHtml -and $appAudit.Count -gt 0) {
+        try {
+            $htmlRows = [System.Collections.Generic.List[string]]::new()
+            $htmlRows.Add("<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:800px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">")
+            $htmlRows.Add("  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">")
+            $htmlRows.Add("    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">Intune Win32 Catalog Audit ($($appAudit.Count) Apps, $uniquePublishers Publishers)</h3>")
+            $htmlRows.Add("    <span style=`"background:#1e293b;color:#94a3b8;padding:2px 8px;border-radius:12px;font-size:12px;`">$(if ($Filter) { "Filter: $Filter" } else { 'All Apps' })</span>")
+            $htmlRows.Add("  </div>")
+            $htmlRows.Add("  <table style=`"width:100%;border-collapse:collapse;font-size:12px;`">")
+            $htmlRows.Add("    <thead><tr style=`"border-bottom:1px solid #334155;color:#94a3b8;text-align:left;`"><th style=`"padding:6px;`">#</th><th style=`"padding:6px;`">App Name</th><th style=`"padding:6px;`">Publisher</th><th style=`"padding:6px;`">Status</th></tr></thead>")
+            $htmlRows.Add("    <tbody>")
+            $r = 0
+            foreach ($entry in $appAudit) {
+                $r++
+                $htmlRows.Add("      <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px;color:#64748b;`">$r</td><td style=`"padding:6px;font-weight:500;`">$($entry.DisplayName)</td><td style=`"padding:6px;color:#cbd5e1;`">$($entry.Publisher)</td><td style=`"padding:6px;color:#38bdf8;`">$($entry.Status)</td></tr>")
+            }
+            $htmlRows.Add("    </tbody>")
+            $htmlRows.Add("  </table>")
+            $htmlRows.Add("</div>")
+            Set-Clipboard -Value ($htmlRows -join "`r`n") -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit HTML table ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyCsv -and $appAudit.Count -gt 0) {
+        try {
+            $csvRows = [System.Collections.Generic.List[string]]::new()
+            $csvRows.Add("AppId,DisplayName,Publisher,Status,CreatedDateTime")
+            foreach ($entry in $appAudit) {
+                $csvRows.Add("`"$($entry.AppId)`",`"$($entry.DisplayName)`",`"$($entry.Publisher)`",`"$($entry.Status)`",`"$($entry.CreatedDateTime)`"")
+            }
+            Set-Clipboard -Value ($csvRows -join "`r`n") -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit CSV rows ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
             }
         } catch { }
     }
