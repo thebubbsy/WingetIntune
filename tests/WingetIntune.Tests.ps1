@@ -528,5 +528,15 @@ Describe 'WingetIntune Production Hardening Tests' {
             $remCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
             $remCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
         }
+
+        It 'Ensures Clear-OrphanedIntuneUploads and Get-PackageAdapter support -CopyHtml and -CopyCsv' {
+            $clearCmd = Get-Command Clear-OrphanedIntuneUploads
+            $clearCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $clearCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+
+            $adapterCmd = Get-Command Get-PackageAdapter
+            $adapterCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
+            $adapterCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+        }
     }
 }

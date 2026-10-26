@@ -24,7 +24,13 @@ function Get-PackageAdapter {
         [switch]$CopyJson,
 
         [Parameter()]
-        [switch]$CopyTsv
+        [switch]$CopyTsv,
+
+        [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
+        [switch]$CopyHtml
     )
 
     $normalized = $InstallerType.Trim().ToLowerInvariant()
@@ -173,6 +179,7 @@ function Get-PackageAdapter {
         $codesText = ($adapter.SuccessCodes -join ', ')
         $sysBadge = if ($adapter.SupportedUnderSystem) { '[SYSTEM READY]' } else { '[USER CONTEXT]' }
         Write-Host ""
+        Write-Host ("  [ADAPTER:{0}] [DETECTION:{1}] [SYSTEM:{2}] [CODES:{3}]" -f $adapter.InstallerType.ToUpperInvariant(), $adapter.DetectionStrategy, $adapter.SupportedUnderSystem, $codesText) -ForegroundColor Cyan
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ("  | WINGET INTUNE ADAPTER SPECIFICATION                 {0,16} |" -f $sysBadge) -ForegroundColor Cyan
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -223,6 +230,45 @@ function Get-PackageAdapter {
             $tsvRow = "$($adapter.InstallerType)`t$($adapter.DetectionStrategy)`t$($adapter.SilentArgs)`t$($adapter.InstallCommandLine)`t$($adapter.UninstallCommandLine)`t$codesStr`t$($adapter.SupportedUnderSystem)`t$($adapter.Notes)"
             Set-Clipboard -Value ("$tsvHeader`r`n$tsvRow") -ErrorAction Stop
             Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (TSV) copied to clipboard." -ForegroundColor Green
+        } catch { }
+    }
+
+    if ($CopyHtml) {
+        try {
+            $codesStr = ($adapter.SuccessCodes -join ', ')
+            $silentStr = if ($adapter.SilentArgs) { $adapter.SilentArgs } else { '<none>' }
+            $htmlAdapter = @(
+                "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+                "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+                "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">Winget Intune Adapter Specification</h3>",
+                "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">$($adapter.InstallerType.ToUpperInvariant())</span>",
+                "  </div>",
+                "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Installer Type</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-weight:600;`">$($adapter.InstallerType.ToUpperInvariant())</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Detection Strategy</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;`">$($adapter.DetectionStrategy)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Silent Arguments</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-family:monospace;`">$silentStr</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Install Command</td><td style=`"padding:6px 0;text-align:right;color:#38bdf8;font-family:monospace;font-size:11px;`">$($adapter.InstallCommandLine)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Uninstall Command</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-family:monospace;font-size:11px;`">$($adapter.UninstallCommandLine)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Success Codes</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$codesStr</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">SYSTEM Supported</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$($adapter.SupportedUnderSystem)</td></tr>",
+                "    <tr><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Notes</td><td style=`"padding:6px 0;text-align:right;color:#94a3b8;font-size:12px;`">$($adapter.Notes)</td></tr>",
+                "  </table>",
+                "</div>"
+            ) -join [Environment]::NewLine
+            Set-Clipboard -Value $htmlAdapter -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (HTML) copied to clipboard." -ForegroundColor Green
+        } catch { }
+    }
+
+    if ($CopyCsv) {
+        try {
+            $codesStr = ($adapter.SuccessCodes -join ', ')
+            $csvAdapter = @(
+                "InstallerType,DetectionStrategy,SilentArgs,InstallCommandLine,UninstallCommandLine,SuccessCodes,SupportedUnderSystem,Notes",
+                "`"$($adapter.InstallerType)`",`"$($adapter.DetectionStrategy)`",`"$($adapter.SilentArgs)`",`"$($adapter.InstallCommandLine)`",`"$($adapter.UninstallCommandLine)`",`"$codesStr`",`"$($adapter.SupportedUnderSystem)`",`"$($adapter.Notes)`""
+            ) -join "`r`n"
+            Set-Clipboard -Value $csvAdapter -ErrorAction Stop
+            Write-Host "  [CLIPBOARD] Winget Intune Adapter Specification (CSV) copied to clipboard." -ForegroundColor Green
         } catch { }
     }
 

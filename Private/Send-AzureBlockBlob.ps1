@@ -57,6 +57,12 @@ function Send-AzureBlockBlob {
         [switch]$CopyTsv,
 
         [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -381,7 +387,40 @@ function Send-AzureBlockBlob {
         } catch { }
     }
 
+    if ($CopyHtml) {
+        try {
+            $htmlBlob = @(
+                "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+                "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+                "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">Azure Storage Block Blob Commit Receipt</h3>",
+                "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">COMMITTED</span>",
+                "  </div>",
+                "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">File Name</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-family:monospace;`">$($fileItem.Name)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Payload Size</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$totalMb MB ($fileLength bytes)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Block Summary</td><td style=`"padding:6px 0;text-align:right;color:#38bdf8;`">$totalBlocks total ($newBlocks uploaded, $alreadyUploaded resumed)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Throughput</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;font-weight:600;`">$mbps MB/s ($([Math]::Round($elapsedSec, 1))s transfer)</td></tr>",
+                "    <tr><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">SHA-256</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;font-family:monospace;font-size:11px;`">$shortHash</td></tr>",
+                "  </table>",
+                "</div>"
+            ) -join [Environment]::NewLine
+            Set-Clipboard -Value $htmlBlob -ErrorAction Stop
+        } catch { }
+    }
+
+    if ($CopyCsv) {
+        try {
+            $csvBlob = @(
+                "FileName,FileLength,PayloadMb,TotalBlocks,UploadedBlocks,ResumedBlocks,ThroughputMbps,ElapsedSec,Sha256",
+                "`"$($fileItem.Name)`",$fileLength,$totalMb,$totalBlocks,$newBlocks,$alreadyUploaded,$mbps,$([Math]::Round($elapsedSec, 1)),`"$fileHash`""
+            ) -join "`r`n"
+            Set-Clipboard -Value $csvBlob -ErrorAction Stop
+        } catch { }
+    }
+
     if (-not $Quiet) {
+        Write-Host ""
+        Write-Host ("  [AZURE:BLOB-COMMITTED] [BLOCKS:{0}] [RESUMED:{1}] [UPLOADED:{2}] [SPEED:{3}MB/s]" -f $totalBlocks, $alreadyUploaded, $newBlocks, $mbps) -ForegroundColor Green
         Write-Host "  [##########] 100% | Azure Block Blob Commit Confirmed ($totalBlocks/$totalBlocks blocks, $mbps MB/s)" -ForegroundColor Green
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkGreen
         Write-Host "  | AZURE STORAGE BLOCK BLOB COMMIT RECEIPT                 [COMMITTED]  |" -ForegroundColor Green

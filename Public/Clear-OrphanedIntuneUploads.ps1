@@ -37,6 +37,12 @@ function Clear-OrphanedIntuneUploads {
         [switch]$CopyJson,
 
         [Parameter()]
+        [switch]$CopyCsv,
+
+        [Parameter()]
+        [switch]$CopyHtml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -176,6 +182,7 @@ function Clear-OrphanedIntuneUploads {
 
     if (-not $Quiet) {
         Write-Host ""
+        Write-Host ("  [CLEANUP:ORPHANS] [MAX-AGE:{0}h] [LOCAL-PURGED:{1}] [GRAPH-PURGED:{2}] [TOTAL-PURGED:{3}]" -f $MaxAgeHours, $localPurgedCount, $graphPurgedCount, $purgedItems.Count) -ForegroundColor Green
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  |  [WingetIntune] Orphaned Session & Upload Cleanup Summary        |" -ForegroundColor Cyan
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -226,6 +233,43 @@ function Clear-OrphanedIntuneUploads {
         } catch {
             Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
         }
+    }
+
+    if ($CopyHtml) {
+        try {
+            $htmlSummary = @(
+                "<div style=`"font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:640px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:8px;padding:16px;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);`">",
+                "  <div style=`"display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #334155;padding-bottom:10px;margin-bottom:12px;`">",
+                "    <h3 style=`"margin:0;color:#38bdf8;font-size:16px;font-weight:600;`">WingetIntune Orphaned Session & Upload Cleanup Receipt</h3>",
+                "    <span style=`"background:#166534;color:#4ade80;padding:2px 8px;border-radius:12px;font-size:12px;font-weight:600;`">PURGED</span>",
+                "  </div>",
+                "  <table style=`"width:100%;border-collapse:collapse;font-size:13px;`">",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Max Age Floor</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$MaxAgeHours hour(s)</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Local Sessions Purged</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$localPurgedCount</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Graph Content Purged</td><td style=`"padding:6px 0;text-align:right;color:#f8fafc;`">$graphPurgedCount</td></tr>",
+                "    <tr style=`"border-bottom:1px solid #1e293b;`"><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Total Items Purged</td><td style=`"padding:6px 0;text-align:right;color:#4ade80;font-weight:600;`">$($purgedItems.Count)</td></tr>",
+                "    <tr><td style=`"padding:6px 0;color:#94a3b8;font-weight:500;`">Completed At (UTC)</td><td style=`"padding:6px 0;text-align:right;color:#94a3b8;font-size:12px;`">$($nowUtc.ToString('yyyy-MM-dd HH:mm:ss'))</td></tr>",
+                "  </table>",
+                "</div>"
+            ) -join [Environment]::NewLine
+            Set-Clipboard -Value $htmlSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Orphan Cleanup Summary HTML to clipboard." -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyCsv) {
+        try {
+            $csvSummary = @(
+                "MaxAgeHours,LocalSessionsPurged,GraphContentPurged,TotalItemsPurged,CompletedAtUtc",
+                "$MaxAgeHours,$localPurgedCount,$graphPurgedCount,$($purgedItems.Count),`"$($nowUtc.ToString('o'))`""
+            ) -join "`r`n"
+            Set-Clipboard -Value $csvSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Orphan Cleanup Summary CSV to clipboard." -ForegroundColor Green
+            }
+        } catch { }
     }
 
     if ($PassThru) {
