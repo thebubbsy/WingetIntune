@@ -532,6 +532,23 @@ Describe 'WingetIntune Production Hardening Tests' {
             $remCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
         }
 
+        It 'Ensures Add-IntuneWingetAssignment and New-IntuneRemediation support -CopyXml' {
+            $assignCmd = Get-Command Add-IntuneWingetAssignment
+            $assignCmd.Parameters.ContainsKey('CopyXml') | Should -BeTrue
+
+            $remCmd = Get-Command New-IntuneRemediation
+            $remCmd.Parameters.ContainsKey('CopyXml') | Should -BeTrue
+
+            $tempOut = Join-Path ([System.IO.Path]::GetTempPath()) "RemXmlTest_$([System.Guid]::NewGuid())"
+            try {
+                $rem = New-IntuneRemediation -PackageId 'Git.Git' -OutputFolder $tempOut -CopyXml -Quiet
+                $rem | Should -Not -BeNullOrEmpty
+                Test-Path (Join-Path $tempOut 'Detect.ps1') | Should -BeTrue
+            } finally {
+                if (Test-Path $tempOut) { Remove-Item $tempOut -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
         It 'Ensures Clear-OrphanedIntuneUploads and Get-PackageAdapter support -CopyHtml and -CopyCsv' {
             $clearCmd = Get-Command Clear-OrphanedIntuneUploads
             $clearCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue

@@ -41,6 +41,9 @@ function Add-IntuneWingetAssignment {
         [switch]$CopyCsv,
 
         [Parameter()]
+        [switch]$CopyXml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -147,6 +150,19 @@ function Add-IntuneWingetAssignment {
         ) -join [Environment]::NewLine
         try { Set-Clipboard -Value $htmlCard -ErrorAction SilentlyContinue } catch { }
     }
+    if ($CopyXml) {
+        $xmlReceipt = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            "<IntuneWingetAssignmentReceipt appId=`"$([Security.SecurityElement]::Escape([string]$AppId))`" intent=`"$([Security.SecurityElement]::Escape([string]$Intent))`" targetScope=`"$([Security.SecurityElement]::Escape([string]$targetScopeLabel))`">",
+            "  <TargetPayload>",
+            "    <ODataType>$([Security.SecurityElement]::Escape([string]$targetPayload['@odata.type']))</ODataType>",
+            "  </TargetPayload>",
+            "  <AssignmentId>$([Security.SecurityElement]::Escape([string]$assignmentIdDisplay))</AssignmentId>",
+            "  <AssignedAt>$([DateTime]::UtcNow.ToString('o'))</AssignedAt>",
+            "</IntuneWingetAssignmentReceipt>"
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $xmlReceipt -ErrorAction SilentlyContinue } catch { }
+    }
     if ($CopyCsv) {
         $csvLines = @(
             "MobileAppId,Intent,TargetScope,GraphTargetType,AssignmentId",
@@ -174,6 +190,7 @@ function Add-IntuneWingetAssignment {
         Write-Host ("  | Graph Target  : {0,-52} |" -f $targetPayload['@odata.type']) -ForegroundColor Gray
         Write-Host ("  | Assignment ID : {0,-52} |" -f $assignmentIdDisplay) -ForegroundColor DarkGray
         Write-Host ("  | Status        : {0,-22} Scope  : {1,-22} |" -f "[ASSIGNED]", $Intent.ToUpper()) -ForegroundColor Green
+        Write-Host "  | Format Feeds  : [MD] [HTML] [CSV] [JSON] [TSV] [XML]                 |" -ForegroundColor DarkGray
         if ($CopyReceipt) {
             Write-Host "  | [CLIPBOARD] Markdown assignment receipt table copied to clipboard.   |" -ForegroundColor Green
         }
@@ -188,6 +205,9 @@ function Add-IntuneWingetAssignment {
         }
         if ($CopyCsv) {
             Write-Host "  | [CLIPBOARD] CSV assignment receipt summary copied to clipboard.      |" -ForegroundColor Green
+        }
+        if ($CopyXml) {
+            Write-Host "  | [CLIPBOARD] XML assignment receipt document copied to clipboard.     |" -ForegroundColor Green
         }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ""

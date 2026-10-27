@@ -41,6 +41,9 @@ function New-IntuneRemediation {
         [switch]$CopyCsv,
 
         [Parameter()]
+        [switch]$CopyXml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -124,14 +127,39 @@ function New-IntuneRemediation {
         Write-Host ("  |  Run Context   : {0,-48}|" -f 'SYSTEM (64-bit PowerShell Host)') -ForegroundColor Gray
         Write-Host ("  |  Output Folder : {0,-48}|" -f $outDirDisplay) -ForegroundColor Gray
         Write-Host ("  |  Status        : {0,-20} Scope  : {1,-20}|" -f "[COMPILED]", "SYSTEM") -ForegroundColor Green
+        Write-Host "  |  Format Feeds  : [MD] [HTML] [CSV] [JSON] [TSV] [XML]           |" -ForegroundColor DarkGray
         if ($CopySummary) {
             Write-Host "  |  [CLIPBOARD] Markdown deployment summary copied to clipboard.   |" -ForegroundColor Green
         }
         if ($CopyHtml) {
             Write-Host "  |  [CLIPBOARD] HTML remediation build receipt copied to clipboard. |" -ForegroundColor Green
         }
-        if ($CopyCsv) {
+        if ($CopyXml) {
+        $xmlSummary = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            "<IntuneRemediationBuildReceipt packageId=`"$([Security.SecurityElement]::Escape([string]$PackageId))`" status=`"COMPILED`">",
+            "  <MinVersion>$(if ($MinVersion) { [Security.SecurityElement]::Escape([string]$MinVersion) } else { 'Any Installed' })</MinVersion>",
+            "  <DetectScript bytes=`"$detectBytes`" sha256=`"$detectHash`">$([Security.SecurityElement]::Escape([string]$detectFile))</DetectScript>",
+            "  <RemediateScript bytes=`"$remediateBytes`" sha256=`"$remediateHash`">$([Security.SecurityElement]::Escape([string]$remediateFile))</RemediateScript>",
+            "  <RunContext>SYSTEM (64-bit PowerShell Host)</RunContext>",
+            "  <OutputFolder>$([Security.SecurityElement]::Escape([string]$OutputFolder))</OutputFolder>",
+            "  <GeneratedAt>$([DateTime]::UtcNow.ToString('o'))</GeneratedAt>",
+            "</IntuneRemediationBuildReceipt>"
+        ) -join [Environment]::NewLine
+        try {
+            Set-Clipboard -Value $xmlSummary -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Copied Proactive Remediation build receipt (XML) to clipboard." -ForegroundColor Cyan
+            }
+        } catch {
+            Write-Verbose "Clipboard copy failed: $($_.Exception.Message)"
+        }
+    }
+    if ($CopyCsv) {
             Write-Host "  |  [CLIPBOARD] CSV remediation build summary copied to clipboard.   |" -ForegroundColor Green
+        }
+        if ($CopyXml) {
+            Write-Host "  |  [CLIPBOARD] XML remediation build receipt copied to clipboard. |" -ForegroundColor Green
         }
         Write-Host "  +------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host "  [OK] Proactive Remediation scripts generated in: $OutputFolder" -ForegroundColor Green
