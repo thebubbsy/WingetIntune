@@ -69,6 +69,9 @@ function New-IntuneWingetPackage {
         [switch]$CopyCsv,
 
         [Parameter()]
+        [switch]$CopyXml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -223,6 +226,20 @@ function New-IntuneWingetPackage {
         )
         try { Set-Clipboard -Value ($tsvLines -join [Environment]::NewLine) -ErrorAction SilentlyContinue } catch { }
     }
+    if ($CopyXml) {
+        $xmlCard = @(
+            '<?xml version="1.0" encoding="utf-8"?>',
+            "<WingetIntunePackage packageId=`"$([Security.SecurityElement]::Escape([string]$PackageId))`" scope=`"$Scope`">",
+            "  <DisplayName>$([Security.SecurityElement]::Escape([string]$DisplayName))</DisplayName>",
+            "  <InstallerAdapter>$([Security.SecurityElement]::Escape([string]$adapter.InstallerType))</InstallerAdapter>",
+            "  <DetectionStrategy>$([Security.SecurityElement]::Escape([string]$adapter.DetectionStrategy))</DetectionStrategy>",
+            "  <PayloadSizeMb>$packageSizeMb</PayloadSizeMb>",
+            "  <Sha256Digest>$sha256Short</Sha256Digest>",
+            "  <IntuneWinPath>$([Security.SecurityElement]::Escape([string]$renamedIntuneWin))</IntuneWinPath>",
+            "</WingetIntunePackage>"
+        ) -join [Environment]::NewLine
+        try { Set-Clipboard -Value $xmlCard -ErrorAction SilentlyContinue } catch { }
+    }
 
     if (-not $Quiet) {
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
@@ -275,6 +292,9 @@ function New-IntuneWingetPackage {
     }
     if ($CopyTsv) {
             Write-Host "  | [CLIPBOARD] TSV .intunewin build summary copied to clipboard.        |" -ForegroundColor Green
+        }
+        if ($CopyXml) {
+            Write-Host "  | [CLIPBOARD] XML .intunewin build metadata copied to clipboard.       |" -ForegroundColor Green
         }
         Write-Host "  +----------------------------------------------------------------------+" -ForegroundColor DarkCyan
     }

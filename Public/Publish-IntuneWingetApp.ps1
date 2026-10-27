@@ -46,6 +46,9 @@ function Publish-IntuneWingetApp {
         [switch]$CopyCsv,
 
         [Parameter()]
+        [switch]$CopyXml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -411,6 +414,30 @@ function Publish-IntuneWingetApp {
                 Set-Clipboard -Value ("$csvHeader`r`n$csvRow") -ErrorAction Stop
                 if (-not $Quiet) {
                     Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt CSV to clipboard." -ForegroundColor Green
+                }
+            } catch { }
+        }
+
+        if ($CopyXml) {
+            try {
+                $xmlReceipt = @(
+                    '<?xml version="1.0" encoding="utf-8"?>',
+                    "<CloudPublicationReceipt intent=`"$Intent`" publishedAt=`"$([DateTime]::UtcNow.ToString('o'))`">",
+                    "  <App>",
+                    "    <Name>$([Security.SecurityElement]::Escape([string]$appName))</Name>",
+                    "    <PackageId>$([Security.SecurityElement]::Escape([string]$PackageId))</PackageId>",
+                    "    <IntuneAppId>$([Security.SecurityElement]::Escape([string]$appId))</IntuneAppId>",
+                    "    <ContentVersionId>$([Security.SecurityElement]::Escape([string]$versionId))</ContentVersionId>",
+                    "    <FileName>$([Security.SecurityElement]::Escape([string]$fileName))</FileName>",
+                    "    <PayloadSizeMb>$pkgSizeMb</PayloadSizeMb>",
+                    "    <Sha256Digest>$([Security.SecurityElement]::Escape([string]$fileHash))</Sha256Digest>",
+                    "    <AssignedGroupsCount>$($AssignTo.Count)</AssignedGroupsCount>",
+                    "  </App>",
+                    "</CloudPublicationReceipt>"
+                ) -join [Environment]::NewLine
+                Set-Clipboard -Value $xmlReceipt -ErrorAction Stop
+                if (-not $Quiet) {
+                    Write-Host "  [CLIPBOARD] Copied Cloud Publication Receipt XML document to clipboard." -ForegroundColor Green
                 }
             } catch { }
         }

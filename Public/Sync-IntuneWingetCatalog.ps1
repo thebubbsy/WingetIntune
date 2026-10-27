@@ -39,6 +39,9 @@ function Sync-IntuneWingetCatalog {
         [switch]$CopyCsv,
 
         [Parameter()]
+        [switch]$CopyXml,
+
+        [Parameter()]
         [switch]$Quiet
     )
 
@@ -108,6 +111,7 @@ function Sync-IntuneWingetCatalog {
         }
         Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
         Write-Host ("  |  " + $footerSummary + "  |") -ForegroundColor Cyan
+        Write-Host "  Format Feeds    : [MD: Ready] [HTML: Ready] [CSV: Ready] [JSON: Ready] [TSV: Ready] [XML: Ready]" -ForegroundColor DarkGray
         Write-Host "  +--------------------------------------------------------------------------------+" -ForegroundColor DarkCyan
     }
 
@@ -186,6 +190,26 @@ function Sync-IntuneWingetCatalog {
             Set-Clipboard -Value ($csvRows -join "`r`n") -ErrorAction Stop
             if (-not $Quiet) {
                 Write-Host "  [CLIPBOARD] Catalog audit CSV rows ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
+            }
+        } catch { }
+    }
+
+    if ($CopyXml -and $appAudit.Count -gt 0) {
+        try {
+            $xmlRows = [System.Collections.Generic.List[string]]::new()
+            $xmlRows.Add('<?xml version="1.0" encoding="utf-8"?>')
+            $xmlRows.Add("<IntuneWingetCatalog totalApps=`"$($appAudit.Count)`" uniquePublishers=`"$uniquePublishers`" timestamp=`"$([DateTime]::UtcNow.ToString('o'))`">")
+            foreach ($entry in $appAudit) {
+                $xmlRows.Add("  <App id=`"$([Security.SecurityElement]::Escape([string]$entry.AppId))`" status=`"$([Security.SecurityElement]::Escape([string]$entry.Status))`">")
+                $xmlRows.Add("    <DisplayName>$([Security.SecurityElement]::Escape([string]$entry.DisplayName))</DisplayName>")
+                $xmlRows.Add("    <Publisher>$([Security.SecurityElement]::Escape([string]$entry.Publisher))</Publisher>")
+                $xmlRows.Add("    <CreatedDateTime>$($entry.CreatedDateTime)</CreatedDateTime>")
+                $xmlRows.Add("  </App>")
+            }
+            $xmlRows.Add("</IntuneWingetCatalog>")
+            Set-Clipboard -Value ($xmlRows -join "`r`n") -ErrorAction Stop
+            if (-not $Quiet) {
+                Write-Host "  [CLIPBOARD] Catalog audit XML document ($($appAudit.Count) apps) copied to clipboard!" -ForegroundColor Green
             }
         } catch { }
     }

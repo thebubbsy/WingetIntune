@@ -505,18 +505,21 @@ Describe 'WingetIntune Production Hardening Tests' {
             $cmd.Parameters.ContainsKey('IntuneWinPath') | Should -BeTrue
         }
 
-        It 'Ensures Sync-IntuneWingetCatalog, New-IntuneWingetPackage, and Publish-IntuneWingetApp support -CopyHtml and -CopyCsv' {
+        It 'Ensures Sync-IntuneWingetCatalog, New-IntuneWingetPackage, and Publish-IntuneWingetApp support -CopyHtml, -CopyCsv, and -CopyXml' {
             $syncCmd = Get-Command Sync-IntuneWingetCatalog
             $syncCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
             $syncCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+            $syncCmd.Parameters.ContainsKey('CopyXml') | Should -BeTrue
 
             $pkgCmd = Get-Command New-IntuneWingetPackage
             $pkgCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
             $pkgCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+            $pkgCmd.Parameters.ContainsKey('CopyXml') | Should -BeTrue
 
             $pubCmd = Get-Command Publish-IntuneWingetApp
             $pubCmd.Parameters.ContainsKey('CopyHtml') | Should -BeTrue
             $pubCmd.Parameters.ContainsKey('CopyCsv') | Should -BeTrue
+            $pubCmd.Parameters.ContainsKey('CopyXml') | Should -BeTrue
         }
 
         It 'Ensures Add-IntuneWingetAssignment and New-IntuneRemediation support -CopyHtml and -CopyCsv' {
